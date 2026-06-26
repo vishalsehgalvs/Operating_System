@@ -421,6 +421,7 @@ OS can now allocate the 2KB hole to a new process.
 > Working code that demonstrates Memory Management and Address Binding in practice.
 
 ### C++ — Simple Version
+
 Simulate the MMU translating logical addresses to physical using base and limit registers; show compile-time vs load-time vs runtime binding.
 
 ```cpp
@@ -481,6 +482,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Simulate multiple processes with separate address spaces; prove isolation and demonstrate swapping (requires execution-time binding).
 
 ```cpp
@@ -550,6 +552,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Simulate the MMU as a class; translate addresses and demonstrate all three binding types.
 
 ```python
@@ -605,6 +608,7 @@ main()
 ```
 
 ### Python — Medium Level
+
 Multiple processes with isolation enforcement; demonstrate why swapping requires execution-time binding.
 
 ```python

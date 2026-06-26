@@ -332,6 +332,7 @@ This is why OSes invest heavily in smart page replacement algorithms and working
 > Working code that demonstrates Virtual Memory and Demand Paging in practice.
 
 ### C++ — Simple Version
+
 Simulate demand paging — all pages start on disk, and the OS loads them into RAM only when accessed (lazy loading with FIFO eviction).
 
 ```cpp
@@ -407,6 +408,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Simulate demand paging and compute **Effective Access Time (EAT)** — the formula that shows how devastating even a 1% fault rate is.
 
 ```cpp
@@ -477,6 +479,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Simulate demand paging step by step — show exactly when each page fault occurs and what gets evicted.
 
 ```python
@@ -523,6 +526,7 @@ print(f"Fault rate  : {faults/len(refs)*100:.1f}%")
 ```
 
 ### Python — Medium Level
+
 Compute **Effective Access Time (EAT)** for different fault rates and show the performance cliff.
 
 ```python

@@ -197,6 +197,7 @@ graph TD
 > Working code that demonstrates Belady's Anomaly — FIFO gives MORE faults with MORE frames.
 
 ### C++ — Simple Version
+
 Run FIFO on the classic reference string `1,2,3,4,1,2,5,1,2,3,4,5` with 3 frames and then 4 frames; show the anomaly.
 
 ```cpp
@@ -286,6 +287,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Show that LRU is **immune** to Belady's Anomaly by sweeping frame counts from 1 to 6 and comparing FIFO vs LRU trends.
 
 ```cpp
@@ -359,6 +361,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Run FIFO with 3 and 4 frames on the classic string; confirm and explain the anomaly.
 
 ```python
@@ -423,6 +426,7 @@ main()
 ```
 
 ### Python — Medium Level
+
 Sweep frame counts 1–6 and compare FIFO vs LRU; prove LRU's stack property by showing its fault count never increases.
 
 ```python

@@ -303,6 +303,7 @@ Most modern OSes use a hybrid — pure demand paging during normal execution, pr
 > Working code that demonstrates the Page Fault Handler in practice.
 
 ### C++ — Simple Version
+
 Simulate the full 6-step page fault handler — valid bit check, find/evict frame, load from disk, update page table, restart instruction.
 
 ```cpp
@@ -412,6 +413,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Page fault handler with **clock (second-chance) eviction** — the algorithm Linux and Windows actually approximate.
 
 ```cpp
@@ -506,6 +508,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Simulate the full 6-step page fault handler with step-by-step printed output.
 
 ```python
@@ -592,6 +595,7 @@ print(f"\nTotal page faults: {page_faults}")
 ```
 
 ### Python — Medium Level
+
 Page fault handler with **clock (second-chance) eviction** — the algorithm used in real OS kernels.
 
 ```python

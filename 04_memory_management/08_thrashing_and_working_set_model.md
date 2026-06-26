@@ -247,6 +247,7 @@ Many modern OSes use a **hybrid** — PFF for normal frame adjustment, Working S
 > Working code that demonstrates the Working Set Model and thrashing prevention in practice.
 
 ### C++ — Simple Version
+
 Compute the working set W(t, Δ) at each time step — the set of distinct pages referenced in the last Δ time units.
 
 ```cpp
@@ -296,6 +297,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Simulate two processes competing for a shared RAM pool; show how total WSS vs available frames predicts thrashing.
 
 ```cpp
@@ -373,6 +375,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Compute and display the working set W(t, Δ) at each time step for a single process.
 
 ```python
@@ -413,6 +416,7 @@ main()
 ```
 
 ### Python — Medium Level
+
 Simulate two processes sharing a RAM pool; use WSS to detect and prevent thrashing by suspending the lower-priority process.
 
 ```python

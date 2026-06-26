@@ -273,6 +273,7 @@ A single program often uses BOTH simultaneously:
 > Working code that demonstrates Dynamic Linking and Dynamic Loading concepts in practice.
 
 ### C++ — Simple Version
+
 Simulate dynamic linking (one shared library copy serves all processes) vs static linking (each process carries its own copy); show the RAM savings.
 
 ```cpp
@@ -368,6 +369,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Simulate **dynamic loading** — modules are loaded on demand only when first called; track which modules are in memory and when they are loaded.
 
 ```cpp
@@ -440,6 +442,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Simulate dynamic linking (shared library loaded once) vs static linking (every process carries its own copy); compute memory savings.
 
 ```python
@@ -515,6 +518,7 @@ main()
 ```
 
 ### Python — Medium Level
+
 Simulate **dynamic loading** with a module loader class — modules are loaded on first call and cached for subsequent calls (mimicking `dlopen()` / `importlib`).
 
 ```python

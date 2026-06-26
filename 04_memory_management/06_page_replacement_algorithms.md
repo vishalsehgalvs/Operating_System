@@ -244,6 +244,7 @@ Exact LRU is expensive because every memory access must update a counter or stac
 > Working code that demonstrates FIFO, LRU, and Optimal page replacement in practice.
 
 ### C++ — Simple Version
+
 Implement all three algorithms; run on reference string `7,0,1,2,0,3,0,4,2,3,0,3,2` with 3 frames.
 
 ```cpp
@@ -345,6 +346,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 **LeetCode #146 — LRU Cache** (the O(1) implementation with `unordered_map` + doubly linked list) combined with page fault counting.
 
 ```cpp
@@ -431,6 +433,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Implement FIFO, LRU, and Optimal; print a comparison table for the classic reference string.
 
 ```python
@@ -525,6 +528,7 @@ main()
 ```
 
 ### Python — Medium Level
+
 **LeetCode #146 — LRU Cache** implemented with `OrderedDict` (O(1) moves); use it to count page faults.
 
 ```python

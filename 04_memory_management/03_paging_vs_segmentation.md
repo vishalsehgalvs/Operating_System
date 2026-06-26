@@ -373,6 +373,7 @@ Intel x86 architecture used this model for years. Modern 64-bit systems have mov
 > Working code that demonstrates Paging and Segmentation address translation in practice.
 
 ### C++ — Simple Version
+
 Simulate paging (page number + offset → frame lookup) and segmentation (segment + offset → base+limit check) side by side.
 
 ```cpp
@@ -466,6 +467,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Paging with a TLB cache — count TLB hits vs misses; show how a 4-entry TLB cuts most page-table lookups.
 
 ```cpp
@@ -540,6 +542,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Simulate both paging and segmentation address translation with step-by-step output.
 
 ```python
@@ -611,6 +614,7 @@ main()
 ```
 
 ### Python — Medium Level
+
 Paging with a TLB cache using an `OrderedDict` for LRU eviction; track hit rate.
 
 ```python

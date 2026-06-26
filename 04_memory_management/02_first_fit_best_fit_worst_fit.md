@@ -376,6 +376,7 @@ flowchart TD
 > Working code that demonstrates First Fit, Best Fit, and Worst Fit memory allocation in practice.
 
 ### C++ — Simple Version
+
 Implement all three strategies and show which hole each picks for a single allocation request.
 
 ```cpp
@@ -450,6 +451,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Simulate a full sequence of allocation requests; compare failures and fragmentation across all three strategies.
 
 ```cpp
@@ -523,6 +525,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Implement all three strategies in readable Python; show which hole each picks.
 
 ```python
@@ -586,6 +589,7 @@ main()
 ```
 
 ### Python — Medium Level
+
 Simulate a sequence of allocations; compare fragmentation and failure counts across strategies.
 
 ```python

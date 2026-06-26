@@ -535,6 +535,7 @@ for (int i = 0; i < N; i++) {
 > Working code that demonstrates threads vs processes — shared memory, isolation, and a 4-way performance benchmark.
 
 ### C++ — Simple Version
+
 Threads share the same vector (direct writes with a mutex); in C++, separate processes need `fork()`/`CreateProcess()` + IPC for communication.
 
 ```cpp
@@ -579,6 +580,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Benchmark single-thread vs 4-thread parallel for CPU-bound work — C++ has no GIL so threads always scale linearly with cores.
 
 ```cpp
@@ -639,6 +641,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Threads share memory (all modify the same list directly); processes have isolated memory (each gets its own copy and cannot modify the parent's list).
 
 ```python
@@ -685,6 +688,7 @@ if __name__ == "__main__":
 ```
 
 ### Python — Medium Level
+
 Benchmark four approaches for a CPU-bound sum — single-thread, threading (GIL blocks), `ProcessPoolExecutor`, and `multiprocessing.Pool`.
 
 ```python

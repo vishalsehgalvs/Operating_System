@@ -275,6 +275,7 @@ Fix with a lock → see the Python and C++ files for full examples.
 > Working code that demonstrates concurrency vs parallelism in practice.
 
 ### C++ — Simple Version
+
 Simulate concurrency (one thread interleaves tasks) vs parallelism (multiple threads run simultaneously on separate cores).
 
 ```cpp
@@ -323,6 +324,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Benchmark sequential (one thread) vs parallel (four threads) on a CPU-bound task; measure wall-clock speedup — C++ has no GIL so threads always scale.
 
 ```cpp
@@ -381,6 +383,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Show concurrency (threading, I/O-bound: fast) vs parallelism (multiprocessing, CPU-bound: bypasses GIL) with real timing output.
 
 ```python
@@ -424,6 +427,7 @@ if __name__ == "__main__":
 ```
 
 ### Python — Medium Level
+
 Benchmark `ThreadPoolExecutor` (GIL-limited) vs `ProcessPoolExecutor` (no GIL) for CPU-bound, and threading for I/O-bound — all side by side.
 
 ```python

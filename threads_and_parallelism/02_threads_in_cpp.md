@@ -504,6 +504,7 @@ int main() {
 > Working code that demonstrates C++ thread creation, lifecycle, and a thread pool pattern in practice.
 
 ### C++ — Simple Version
+
 Create 5 threads, each prints its ID, join all — demonstrates the full thread lifecycle: create → run → join → terminate.
 
 ```cpp
@@ -542,6 +543,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Thread pool with 4 workers: `std::queue` holds tasks, `std::mutex` protects the queue, `std::condition_variable` wakes sleeping workers — the classic interview implementation.
 
 ```cpp
@@ -617,6 +619,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Create N threads with `threading.Thread`; prove GIL impact — I/O-bound tasks run concurrently (fast), CPU-bound tasks do not speed up with more threads.
 
 ```python
@@ -658,6 +661,7 @@ print("  → Use multiprocessing.Pool for CPU-bound parallelism")
 ```
 
 ### Python — Medium Level
+
 `ThreadPoolExecutor` for I/O-bound, `ProcessPoolExecutor` for CPU-bound, and `asyncio` for massive single-threaded concurrency — see which model wins for each task type.
 
 ```python

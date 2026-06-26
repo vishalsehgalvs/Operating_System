@@ -572,6 +572,7 @@ asyncio.run(main())
 > Working code that demonstrates Python threading, multiprocessing, and concurrent.futures in practice.
 
 ### C++ — Simple Version
+
 Create N `std::thread` objects (the C++ equivalent of `threading.Thread`) — no GIL means CPU-bound work truly scales across cores.
 
 ```cpp
@@ -609,6 +610,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 `std::async` + `std::future` for task-based parallelism — the C++ equivalent of `concurrent.futures.ProcessPoolExecutor`.
 
 ```cpp
@@ -654,6 +656,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Create N threads with `threading.Thread`; prove GIL impact — I/O-bound tasks run concurrently (fast), CPU-bound tasks do not speed up.
 
 ```python
@@ -695,6 +698,7 @@ print("  → Use multiprocessing.Pool for CPU-bound parallelism")
 ```
 
 ### Python — Medium Level
+
 `concurrent.futures`: `ThreadPoolExecutor` for I/O-bound, `ProcessPoolExecutor` for CPU-bound, plus `asyncio` for single-threaded massive concurrency — all compared.
 
 ```python

@@ -12,7 +12,8 @@
 4. [Threading Models](#4-threading-models)
 5. [The Global Interpreter Lock (GIL) in Python](#5-the-global-interpreter-lock-gil-in-python)
 6. [Race Conditions and Synchronization Recap](#6-race-conditions-and-synchronization-recap)
-7. [Key Takeaways](#7-key-takeaways)
+7. [Code Examples](#7-code-examples)
+8. [Key Takeaways](#8-key-takeaways)
 
 ---
 
@@ -269,7 +270,213 @@ Fix with a lock → see the Python and C++ files for full examples.
 
 ---
 
-## 7. Key Takeaways
+## 7. Code Examples
+
+> Working code that demonstrates concurrency vs parallelism in practice.
+
+### C++ — Simple Version
+Simulate concurrency (one thread interleaves tasks) vs parallelism (multiple threads run simultaneously on separate cores).
+
+```cpp
+#include <iostream>
+#include <thread>
+#include <string>
+
+// ─── CONCURRENCY: one thread, tasks interleaved ───────────────────────
+void show_concurrency() {
+    std::cout << "=== CONCURRENCY (single thread, interleaved) ===\n";
+    // One "cook" alternates between tasks — only one runs at any instant
+    auto chop  = [](int r){ std::cout << "  [Cook] Round " << r << ": chopping\n"; };
+    auto stir  = [](int r){ std::cout << "  [Cook] Round " << r << ": stirring\n"; };
+    auto check = [](int r){ std::cout << "  [Cook] Round " << r << ": checking oven\n"; };
+
+    for (int r = 1; r <= 3; r++) {   // 3 rounds of interleaving
+        chop(r); stir(r); check(r);
+    }
+    std::cout << "  -> Single thread: tasks interleaved, never truly simultaneous\n\n";
+}
+
+// ─── PARALLELISM: multiple threads running simultaneously ─────────────
+void show_parallelism() {
+    std::cout << "=== PARALLELISM (multiple threads, simultaneous) ===\n";
+
+    auto cook = [](const std::string& name, int rounds) {
+        for (int r = 1; r <= rounds; r++)
+            std::cout << "  [" << name << "] round " << r << "\n";
+    };
+
+    // Three threads run at the same time on separate cores
+    std::thread cookA(cook, "Cook-A", 3);
+    std::thread cookB(cook, "Cook-B", 3);
+    std::thread cookC(cook, "Cook-C", 3);
+
+    cookA.join(); cookB.join(); cookC.join();
+    std::cout << "  -> Output is non-deterministic — threads ran truly in parallel\n";
+}
+
+int main() {
+    show_concurrency();
+    show_parallelism();
+    return 0;
+}
+// Compile: g++ -std=c++17 -pthread concurrency_demo.cpp -o concurrency_demo
+```
+
+### C++ — Medium / LeetCode Style
+Benchmark sequential (one thread) vs parallel (four threads) on a CPU-bound task; measure wall-clock speedup — C++ has no GIL so threads always scale.
+
+```cpp
+#include <iostream>
+#include <thread>
+#include <vector>
+#include <numeric>
+#include <chrono>
+
+using Clock = std::chrono::steady_clock;
+using Ms    = std::chrono::milliseconds;
+
+long long cpu_work(long long start, long long end) {
+    long long s = 0;
+    for (long long i = start; i < end; i++) s += i * i;
+    return s;
+}
+
+template<typename Fn>
+void timed(const std::string& label, Fn fn) {
+    auto t0 = Clock::now();
+    fn();
+    auto ms = std::chrono::duration_cast<Ms>(Clock::now() - t0).count();
+    std::cout << "  " << label << ": " << ms << "ms\n";
+}
+
+int main() {
+    const long long N = 50'000'000LL;
+    const int T = 4;
+
+    std::cout << "CPU-Bound benchmark: sum of squares 0.." << N << "\n\n";
+
+    // ── 1. Sequential (single thread does all work) ───────────────────
+    timed("1. Sequential (1 thread)  ", [&]{ cpu_work(0, N); });
+
+    // ── 2. Parallel (T threads — C++ has NO GIL, runs truly parallel) ─
+    timed("2. Parallel   (" + std::to_string(T) + " threads)", [&] {
+        long long chunk = N / T;
+        std::vector<std::thread> threads;
+        std::vector<long long>   results(T, 0);
+        for (int i = 0; i < T; i++) {
+            long long from = i * chunk, to = (i + 1 == T) ? N : from + chunk;
+            threads.emplace_back([&results, i, from, to]{
+                results[i] = cpu_work(from, to);
+            });
+        }
+        for (auto& t : threads) t.join();
+        std::accumulate(results.begin(), results.end(), 0LL);
+    });
+
+    std::cout << "\nC++ has no GIL → threads run truly in parallel.\n";
+    std::cout << "Expected: ~" << T << "x speedup on a " << T << "-core machine.\n";
+    return 0;
+}
+// Compile: g++ -std=c++17 -pthread -O2 cpp_parallel.cpp -o cpp_parallel
+```
+
+### Python — Simple Version
+Show concurrency (threading, I/O-bound: fast) vs parallelism (multiprocessing, CPU-bound: bypasses GIL) with real timing output.
+
+```python
+import time
+import threading
+import multiprocessing
+
+def io_task(task_id):
+    """I/O-bound: sleep releases the GIL so other threads can run."""
+    time.sleep(0.5)
+
+def cpu_task(n):
+    """CPU-bound: pure computation — GIL is held the entire time."""
+    return sum(i * i for i in range(n))
+
+N = 4   # Number of tasks to run
+
+# ── Concurrency: threads excel at I/O-bound work ─────────────────────
+print("=== I/O-Bound: Threading (CONCURRENCY) ===")
+start = time.time()
+threads = [threading.Thread(target=io_task, args=(i,)) for i in range(N)]
+for t in threads: t.start()
+for t in threads: t.join()
+print(f"  {N} threads × 0.5s → {time.time() - start:.2f}s  (expected ~0.5s, not 2.0s!)\n")
+
+# ── Parallelism: multiprocessing bypasses GIL for CPU work ───────────
+if __name__ == "__main__":
+    print("=== CPU-Bound: Multiprocessing (PARALLELISM) ===")
+    WORK = 5_000_000
+
+    start = time.time()
+    [cpu_task(WORK) for _ in range(N)]        # Sequential baseline
+    seq = time.time() - start
+    print(f"  Sequential:      {seq:.2f}s")
+
+    start = time.time()
+    with multiprocessing.Pool(N) as pool:
+        pool.map(cpu_task, [WORK] * N)         # True parallelism, each process has own GIL
+    par = time.time() - start
+    print(f"  multiprocessing: {par:.2f}s  (~{seq/par:.1f}x speedup on {N} cores)")
+```
+
+### Python — Medium Level
+Benchmark `ThreadPoolExecutor` (GIL-limited) vs `ProcessPoolExecutor` (no GIL) for CPU-bound, and threading for I/O-bound — all side by side.
+
+```python
+import time
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+
+def cpu_work(n):
+    """CPU-bound: GIL blocks threads, but not processes."""
+    return sum(i * i for i in range(n))
+
+def io_work(delay):
+    """I/O-bound: GIL released during sleep — threads work well here."""
+    import time; time.sleep(delay); return delay
+
+TASKS = 4
+N = 3_000_000
+
+def bench(label, fn):
+    start = time.time()
+    fn()
+    print(f"  {label:<52} {time.time() - start:.2f}s")
+
+if __name__ == "__main__":
+    work = [N] * TASKS
+
+    print("CPU-BOUND (sum of squares)")
+    print("-" * 60)
+    bench("Sequential (baseline):",
+          lambda: [cpu_work(n) for n in work])
+    with ThreadPoolExecutor(TASKS) as ex:
+        bench("ThreadPoolExecutor (GIL blocked — no speedup):",
+              lambda: list(ex.map(cpu_work, work)))
+    with ProcessPoolExecutor(TASKS) as ex:
+        bench("ProcessPoolExecutor (no GIL — true parallel):",
+              lambda: list(ex.map(cpu_work, work)))
+
+    print("\nI/O-BOUND (0.5s sleep × 4 tasks)")
+    print("-" * 60)
+    delays = [0.5] * TASKS
+    bench("Sequential (baseline):",
+          lambda: [io_work(d) for d in delays])
+    with ThreadPoolExecutor(TASKS) as ex:
+        bench("ThreadPoolExecutor (concurrent — great speedup):",
+              lambda: list(ex.map(io_work, delays)))
+
+    print("\nConclusion:")
+    print("  CPU-bound → ProcessPoolExecutor  (bypass the GIL)")
+    print("  I/O-bound → ThreadPoolExecutor   (GIL released during I/O)")
+```
+
+---
+
+## 8. Key Takeaways
 
 - **Concurrency** = tasks overlap in time (interleaving); **Parallelism** = tasks run at the exact same instant
 - A **thread** lives inside a process, shares its memory, and is cheap to create

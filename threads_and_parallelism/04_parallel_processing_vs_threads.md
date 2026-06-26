@@ -15,7 +15,8 @@
 7. [Common Parallel Patterns](#7-common-parallel-patterns)
 8. [Real-World Architecture Examples](#8-real-world-architecture-examples)
 9. [Language Quick Reference](#9-language-quick-reference)
-10. [Key Takeaways](#10-key-takeaways)
+10. [Code Examples](#10-code-examples)
+11. [Key Takeaways](#11-key-takeaways)
 
 ---
 
@@ -529,7 +530,215 @@ for (int i = 0; i < N; i++) {
 
 ---
 
-## 10. Key Takeaways
+## 10. Code Examples
+
+> Working code that demonstrates threads vs processes — shared memory, isolation, and a 4-way performance benchmark.
+
+### C++ — Simple Version
+Threads share the same vector (direct writes with a mutex); in C++, separate processes need `fork()`/`CreateProcess()` + IPC for communication.
+
+```cpp
+#include <iostream>
+#include <thread>
+#include <vector>
+#include <mutex>
+
+// ─── THREADS: all threads share the SAME memory ──────────────────────
+// Every thread in a process accesses the exact same global variables
+
+std::vector<int> shared_vec;   // All threads modify this exact vector
+std::mutex        vec_mutex;   // Protect from concurrent writes
+
+void thread_append(int value) {
+    std::lock_guard<std::mutex> guard(vec_mutex);
+    shared_vec.push_back(value);   // Direct write to shared memory
+    std::cout << "Thread " << value << " wrote → shared_vec size = "
+              << shared_vec.size() << "\n";
+}
+
+int main() {
+    std::cout << "=== C++ Threads: Shared Memory ===\n";
+
+    std::vector<std::thread> threads;
+    for (int i = 0; i < 5; i++)
+        threads.emplace_back(thread_append, i);
+    for (auto& t : threads) t.join();
+
+    std::cout << "Final shared_vec: [";
+    for (int i = 0; i < (int)shared_vec.size(); i++) {
+        std::cout << shared_vec[i];
+        if (i + 1 < (int)shared_vec.size()) std::cout << ", ";
+    }
+    std::cout << "]\n";
+    std::cout << "→ All 5 threads modified THE SAME vector in memory\n\n";
+    std::cout << "NOTE: C++ separate processes need fork()/CreateProcess() + IPC.\n";
+    std::cout << "      Threads always share memory natively — no IPC needed.\n";
+    return 0;
+}
+// Compile: g++ -std=c++17 -pthread shared_memory.cpp -o shared_memory
+```
+
+### C++ — Medium / LeetCode Style
+Benchmark single-thread vs 4-thread parallel for CPU-bound work — C++ has no GIL so threads always scale linearly with cores.
+
+```cpp
+#include <iostream>
+#include <thread>
+#include <vector>
+#include <numeric>
+#include <chrono>
+
+using Clock = std::chrono::steady_clock;
+using Ms    = std::chrono::milliseconds;
+
+long long partial_sum(long long start, long long end) {
+    long long s = 0;
+    for (long long i = start; i < end; i++) s += i * i;
+    return s;
+}
+
+template<typename Fn>
+void timed(const std::string& label, Fn fn) {
+    auto t0 = Clock::now();
+    fn();
+    std::cout << "  " << label << ": "
+              << std::chrono::duration_cast<Ms>(Clock::now() - t0).count()
+              << "ms\n";
+}
+
+int main() {
+    const long long N = 50'000'000LL;
+    const int W = 4;
+
+    std::cout << "Parallel Benchmark: sum of squares 0.." << N << "\n\n";
+
+    // ── 1. Single-thread baseline ──────────────────────────────────────
+    timed("1. Single-thread         ", [&]{ partial_sum(0, N); });
+
+    // ── 2. W threads in parallel — C++ has NO GIL ────────────────────
+    timed("2. " + std::to_string(W) + " threads (true parallel)", [&] {
+        long long chunk = N / W;
+        std::vector<std::thread> threads;
+        std::vector<long long>   results(W, 0);
+        for (int i = 0; i < W; i++) {
+            long long from = i * chunk, to = (i + 1 == W) ? N : from + chunk;
+            threads.emplace_back([&results, i, from, to]{
+                results[i] = partial_sum(from, to);
+            });
+        }
+        for (auto& t : threads) t.join();
+        std::accumulate(results.begin(), results.end(), 0LL);
+    });
+
+    std::cout << "\nC++ has no GIL → CPU-bound threads scale with cores.\n";
+    std::cout << "Expected: ~" << W << "x speedup with " << W << " threads.\n";
+    std::cout << "(Python needs multiprocessing — not threading — for equivalent speedup)\n";
+    return 0;
+}
+// Compile: g++ -std=c++17 -pthread -O2 cpp_bench.cpp -o cpp_bench
+```
+
+### Python — Simple Version
+Threads share memory (all modify the same list directly); processes have isolated memory (each gets its own copy and cannot modify the parent's list).
+
+```python
+import threading
+import multiprocessing
+
+# ─── THREADS: shared memory — all threads see THE SAME list ──────────
+print("=== THREADS: Shared Memory ===")
+
+shared_list = []
+lock = threading.Lock()
+
+def thread_append(value):
+    with lock:
+        shared_list.append(value)   # Direct write to shared memory
+
+threads = [threading.Thread(target=thread_append, args=(i,)) for i in range(5)]
+for t in threads: t.start()
+for t in threads: t.join()
+
+print(f"  shared_list: {sorted(shared_list)}")
+print("  → All 5 threads wrote to THE SAME list\n")
+
+# ─── PROCESSES: isolated memory — each process gets its OWN COPY ──────
+print("=== PROCESSES: Isolated Memory ===")
+
+def process_append(lst, value):
+    lst.append(value)                          # Only modifies THIS process's copy
+    print(f"  Process {value}: local list = {lst}   (not visible to parent)")
+
+if __name__ == "__main__":
+    original = []
+
+    processes = [
+        multiprocessing.Process(target=process_append, args=(original, i))
+        for i in range(5)
+    ]
+    for p in processes: p.start()
+    for p in processes: p.join()
+
+    print(f"  original list in main process: {original}")
+    print("  → Processes CANNOT modify the parent's list (isolated memory)")
+    print("  → Use multiprocessing.Queue or Pipe for cross-process data sharing")
+```
+
+### Python — Medium Level
+Benchmark four approaches for a CPU-bound sum — single-thread, threading (GIL blocks), `ProcessPoolExecutor`, and `multiprocessing.Pool`.
+
+```python
+import time
+import multiprocessing
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+
+# Top-level function required — multiprocessing uses pickle, lambdas can't be pickled
+def partial_sum(args):
+    start, end = args
+    return sum(range(start, end))
+
+TOTAL = 50_000_000   # Sum 0..50M
+N = 4                 # Split into N chunks, one per worker
+
+def make_chunks():
+    size = TOTAL // N
+    return [(i * size, (i + 1) * size) for i in range(N)]
+
+def timed(label, fn):
+    t = time.time(); r = fn()
+    print(f"  {label:<52} {time.time()-t:.2f}s  sum={r}")
+
+if __name__ == "__main__":
+    chunks = make_chunks()
+    print(f"CPU-Bound Benchmark: sum(0..{TOTAL:,}) in {N} chunks\n")
+
+    # ── 1. Single-thread baseline ──────────────────────────────────────
+    timed("1. Single-thread:", lambda: sum(range(TOTAL)))
+
+    # ── 2. Threading: GIL prevents true CPU parallelism ───────────────
+    with ThreadPoolExecutor(max_workers=N) as ex:
+        timed("2. ThreadPoolExecutor (GIL blocked):",
+              lambda: sum(ex.map(partial_sum, chunks)))
+
+    # ── 3. ProcessPoolExecutor: each process has own GIL ─────────────
+    with ProcessPoolExecutor(max_workers=N) as ex:
+        timed("3. ProcessPoolExecutor (true parallel):",
+              lambda: sum(ex.map(partial_sum, chunks)))
+
+    # ── 4. multiprocessing.Pool: classic lower-level API ─────────────
+    with multiprocessing.Pool(processes=N) as pool:
+        timed("4. multiprocessing.Pool:",
+              lambda: sum(pool.map(partial_sum, chunks)))
+
+    print(f"\nExpected on a {N}-core machine:")
+    print("  #1 single:   1.0x (baseline)")
+    print("  #2 threads:  ~1.0x or slower (GIL forces serial CPU execution)")
+    print("  #3/#4 procs: ~3-4x faster (true parallel — each process bypasses GIL)")
+```
+
+---
+
+## 11. Key Takeaways
 
 - **I/O-bound** = task spends time waiting → threads/async help (CPU is free to run other tasks during waits)
 - **CPU-bound** = task keeps CPU at 100% → need more cores (Python: `multiprocessing`; C++: `std::thread`)

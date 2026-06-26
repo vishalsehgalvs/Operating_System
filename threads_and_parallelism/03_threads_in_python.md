@@ -16,7 +16,8 @@
 8. [multiprocessing Module](#8-multiprocessing-module)
 9. [concurrent.futures — Unified Interface](#9-concurrentfutures--unified-interface)
 10. [asyncio — Single-Threaded Concurrency](#10-asyncio--single-threaded-concurrency)
-11. [Key Takeaways](#11-key-takeaways)
+11. [Code Examples](#11-code-examples)
+12. [Key Takeaways](#12-key-takeaways)
 
 ---
 
@@ -566,7 +567,193 @@ asyncio.run(main())
 
 ---
 
-## 11. Key Takeaways
+## 11. Code Examples
+
+> Working code that demonstrates Python threading, multiprocessing, and concurrent.futures in practice.
+
+### C++ — Simple Version
+Create N `std::thread` objects (the C++ equivalent of `threading.Thread`) — no GIL means CPU-bound work truly scales across cores.
+
+```cpp
+#include <iostream>
+#include <thread>
+#include <vector>
+#include <chrono>
+
+// C++ equivalent of Python's threading.Thread — no GIL limitation for CPU work
+void worker(int id, int work_units) {
+    long long total = 0;
+    for (int i = 0; i < work_units; i++) total += i;   // CPU-bound: parallel in C++
+    std::cout << "Thread " << id << " done (sum=" << total << ")\n";
+}
+
+int main() {
+    const int N = 4, WORK = 5'000'000;
+
+    auto start = std::chrono::steady_clock::now();
+
+    std::vector<std::thread> threads;
+    for (int i = 0; i < N; i++)
+        threads.emplace_back(worker, i, WORK);   // All start immediately
+
+    for (auto& t : threads) t.join();
+
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start).count();
+
+    std::cout << N << " CPU-bound threads done in " << ms << "ms\n";
+    std::cout << "(In Python, threading for CPU work would NOT be faster due to the GIL)\n";
+    return 0;
+}
+// Compile: g++ -std=c++17 -pthread -O2 cpp_threads.cpp -o cpp_threads
+```
+
+### C++ — Medium / LeetCode Style
+`std::async` + `std::future` for task-based parallelism — the C++ equivalent of `concurrent.futures.ProcessPoolExecutor`.
+
+```cpp
+#include <iostream>
+#include <future>
+#include <vector>
+#include <chrono>
+#include <numeric>
+
+long long partial_sum(long long start, long long end) {
+    long long s = 0;
+    for (long long i = start; i < end; i++) s += i * i;
+    return s;
+}
+
+int main() {
+    const long long N = 50'000'000LL;
+    const int TASKS = 4;
+    long long chunk = N / TASKS;
+
+    auto t0 = std::chrono::steady_clock::now();
+
+    // Launch TASKS futures in parallel (like ProcessPoolExecutor.map in Python)
+    std::vector<std::future<long long>> futures;
+    for (int i = 0; i < TASKS; i++) {
+        long long from = i * chunk;
+        long long to   = (i + 1 == TASKS) ? N : from + chunk;
+        futures.push_back(std::async(std::launch::async, partial_sum, from, to));
+    }
+
+    // Collect results — blocks until each future is ready
+    long long total = 0;
+    for (auto& f : futures) total += f.get();
+
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - t0).count();
+
+    std::cout << "Sum of squares 0.." << N << " = " << total << "\n";
+    std::cout << "Parallel time: " << ms << "ms  (expected ~" << TASKS << "x faster)\n";
+    return 0;
+}
+// Compile: g++ -std=c++17 -pthread -O2 async_futures.cpp -o async_futures
+```
+
+### Python — Simple Version
+Create N threads with `threading.Thread`; prove GIL impact — I/O-bound tasks run concurrently (fast), CPU-bound tasks do not speed up.
+
+```python
+import threading
+import time
+
+def io_task(tid):
+    """I/O-bound: sleep releases the GIL so other threads can run."""
+    time.sleep(0.5)
+    print(f"  Thread {tid}: I/O done")
+
+def cpu_task(n):
+    """CPU-bound: GIL held — only one thread executes Python bytecode at a time."""
+    return sum(i * i for i in range(n))
+
+N, WORK = 4, 3_000_000
+
+# ── I/O-bound: threading works great ──────────────────────────────────
+print("=== I/O-Bound: threading.Thread ===")
+start = time.time()
+threads = [threading.Thread(target=io_task, args=(i,)) for i in range(N)]
+for t in threads: t.start()
+for t in threads: t.join()
+print(f"  {N} threads × 0.5s → {time.time()-start:.2f}s  (expect ~0.5s)\n")
+
+# ── CPU-bound: threading does NOT help ───────────────────────────────
+print("=== CPU-Bound: Sequential vs Threads ===")
+start = time.time()
+[cpu_task(WORK) for _ in range(N)]    # Sequential baseline
+seq = time.time() - start
+print(f"  Sequential:  {seq:.2f}s")
+
+start = time.time()
+threads = [threading.Thread(target=cpu_task, args=(WORK,)) for _ in range(N)]
+for t in threads: t.start()
+for t in threads: t.join()
+print(f"  {N} threads:  {time.time()-start:.2f}s  (GIL → similar or slower than sequential!)")
+print("  → Use multiprocessing.Pool for CPU-bound parallelism")
+```
+
+### Python — Medium Level
+`concurrent.futures`: `ThreadPoolExecutor` for I/O-bound, `ProcessPoolExecutor` for CPU-bound, plus `asyncio` for single-threaded massive concurrency — all compared.
+
+```python
+import time
+import asyncio
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+
+def cpu_work(n):
+    """CPU-bound: GIL blocks multi-thread execution."""
+    return sum(i * i for i in range(n))
+
+def io_work(delay):
+    """I/O-bound: GIL released during sleep."""
+    import time; time.sleep(delay); return delay
+
+async def async_io(delay):
+    """asyncio coroutine: yields on await, letting event loop run others."""
+    await asyncio.sleep(delay)
+    return delay
+
+TASKS, N = 4, 2_000_000
+
+def bench(label, fn):
+    t = time.time(); fn()
+    print(f"  {label:<55} {time.time()-t:.2f}s")
+
+if __name__ == "__main__":
+    work, delays = [N] * TASKS, [0.5] * TASKS
+
+    print("CPU-BOUND: Which tool wins?")
+    print("-" * 65)
+    bench("Sequential (baseline):",
+          lambda: [cpu_work(n) for n in work])
+    with ThreadPoolExecutor(TASKS) as ex:
+        bench("ThreadPoolExecutor  (GIL blocked — no speedup):",
+              lambda: list(ex.map(cpu_work, work)))
+    with ProcessPoolExecutor(TASKS) as ex:
+        bench("ProcessPoolExecutor (no GIL  — true parallel):",
+              lambda: list(ex.map(cpu_work, work)))
+
+    print("\nI/O-BOUND: Which tool wins?")
+    print("-" * 65)
+    bench("Sequential (baseline):",
+          lambda: [io_work(d) for d in delays])
+    with ThreadPoolExecutor(TASKS) as ex:
+        bench("ThreadPoolExecutor  (concurrent — great speedup):",
+              lambda: list(ex.map(io_work, delays)))
+    bench("asyncio gather         (single-thread, cooperative):",
+          lambda: asyncio.run(asyncio.gather(*[async_io(d) for d in delays])))
+
+    print("\nDecision guide:")
+    print("  CPU-bound              → ProcessPoolExecutor  (bypass GIL with processes)")
+    print("  I/O-bound (< 100 tasks) → ThreadPoolExecutor")
+    print("  I/O-bound (1000+ tasks) → asyncio  (less overhead per task)")
+```
+
+---
+
+## 12. Key Takeaways
 
 - `threading.Thread(target=func, args=(...))` + `.start()` + `.join()` — basic thread creation
 - Use `with lock:` (context manager) — never manually call `acquire()`/`release()` without try/finally

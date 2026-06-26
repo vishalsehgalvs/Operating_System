@@ -15,7 +15,8 @@
 7. [std::atomic](#7-stdatomic)
 8. [std::async and std::future](#8-stdasync-and-stdfuture)
 9. [Thread Pool Pattern](#9-thread-pool-pattern)
-10. [Key Takeaways](#10-key-takeaways)
+10. [Code Examples](#10-code-examples)
+11. [Key Takeaways](#11-key-takeaways)
 
 ---
 
@@ -498,7 +499,211 @@ int main() {
 
 ---
 
-## 10. Key Takeaways
+## 10. Code Examples
+
+> Working code that demonstrates C++ thread creation, lifecycle, and a thread pool pattern in practice.
+
+### C++ — Simple Version
+Create 5 threads, each prints its ID, join all — demonstrates the full thread lifecycle: create → run → join → terminate.
+
+```cpp
+#include <iostream>
+#include <thread>
+#include <vector>
+
+// This function runs on each worker thread
+void thread_job(int thread_id) {
+    std::cout << "Thread " << thread_id << " is running\n";
+    // When this function returns, the thread terminates automatically
+}
+
+int main() {
+    const int N = 5;
+    std::vector<std::thread> threads;
+
+    // LIFECYCLE STEP 1: Create threads — each starts running immediately
+    std::cout << "Creating " << N << " threads...\n";
+    for (int i = 0; i < N; i++) {
+        threads.emplace_back(thread_job, i);   // thread_job(i) on a new OS thread
+    }
+
+    // LIFECYCLE STEP 2: Join — main thread blocks until every thread finishes
+    std::cout << "Waiting for threads...\n";
+    for (auto& t : threads) {
+        t.join();   // Must join (or detach) before the std::thread object is destroyed
+    }
+
+    // LIFECYCLE STEP 3: All threads terminated — safe to access shared state
+    std::cout << "All " << N << " threads done!\n";
+    return 0;
+}
+// Compile: g++ -std=c++17 -pthread thread_lifecycle.cpp -o thread_lifecycle
+// Note: output lines appear in non-deterministic order (OS schedules threads freely)
+```
+
+### C++ — Medium / LeetCode Style
+Thread pool with 4 workers: `std::queue` holds tasks, `std::mutex` protects the queue, `std::condition_variable` wakes sleeping workers — the classic interview implementation.
+
+```cpp
+#include <iostream>
+#include <thread>
+#include <vector>
+#include <queue>
+#include <functional>
+#include <mutex>
+#include <condition_variable>
+#include <atomic>
+#include <chrono>
+
+class ThreadPool {
+public:
+    explicit ThreadPool(int n) : running_(true) {
+        for (int i = 0; i < n; i++)
+            workers_.emplace_back([this]{ worker_loop(); });
+    }
+
+    // Submit a task — thread-safe, can be called from any thread
+    void submit(std::function<void()> task) {
+        { std::lock_guard<std::mutex> lk(mu_); queue_.push(std::move(task)); }
+        cv_.notify_one();   // Wake one sleeping worker
+    }
+
+    ~ThreadPool() {
+        { std::lock_guard<std::mutex> lk(mu_); running_ = false; }
+        cv_.notify_all();                     // Wake all workers so they can exit
+        for (auto& t : workers_) t.join();    // Wait for all to finish
+    }
+
+private:
+    void worker_loop() {
+        while (true) {
+            std::function<void()> task;
+            {
+                std::unique_lock<std::mutex> lk(mu_);
+                cv_.wait(lk, [this]{ return !queue_.empty() || !running_; });
+                if (!running_ && queue_.empty()) return;
+                task = std::move(queue_.front());
+                queue_.pop();
+            }
+            task();   // Execute the task OUTSIDE the lock
+        }
+    }
+
+    std::vector<std::thread>          workers_;
+    std::queue<std::function<void()>> queue_;
+    std::mutex                         mu_;
+    std::condition_variable            cv_;
+    bool                               running_;
+};
+
+int main() {
+    ThreadPool pool(4);           // 4 worker threads
+    std::atomic<int> done{0};
+
+    // Submit 10 tasks — pool distributes them across 4 workers
+    for (int i = 0; i < 10; i++) {
+        pool.submit([i, &done]{
+            std::cout << "Task " << i << " on thread "
+                      << std::this_thread::get_id() << "\n";
+            ++done;
+        });
+    }
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    std::cout << done << "/10 tasks completed\n";
+    return 0;   // Pool destructor joins all workers when it goes out of scope
+}
+// Compile: g++ -std=c++17 -pthread thread_pool.cpp -o thread_pool
+```
+
+### Python — Simple Version
+Create N threads with `threading.Thread`; prove GIL impact — I/O-bound tasks run concurrently (fast), CPU-bound tasks do not speed up with more threads.
+
+```python
+import threading
+import time
+
+def io_task(thread_id):
+    """I/O-bound: sleep releases the GIL so other threads run Python code."""
+    time.sleep(0.5)
+    print(f"Thread {thread_id}: I/O done")
+
+def cpu_task(n):
+    """CPU-bound: GIL is held — only one thread executes Python bytecode at a time."""
+    return sum(i * i for i in range(n))
+
+N, WORK = 5, 3_000_000
+
+# ── I/O-bound: threading works great ──────────────────────────────────
+print("=== I/O-Bound (threading works well) ===")
+start = time.time()
+threads = [threading.Thread(target=io_task, args=(i,)) for i in range(N)]
+for t in threads: t.start()
+for t in threads: t.join()
+print(f"  {N} threads × 0.5s → {time.time()-start:.2f}s  (expected ~0.5s)\n")
+
+# ── CPU-bound: GIL prevents true parallelism ──────────────────────────
+print("=== CPU-Bound (GIL prevents speedup) ===")
+start = time.time()
+cpu_task(WORK * N)                    # Sequential baseline
+seq = time.time() - start
+print(f"  Sequential:   {seq:.2f}s")
+
+start = time.time()
+threads = [threading.Thread(target=cpu_task, args=(WORK,)) for _ in range(N)]
+for t in threads: t.start()
+for t in threads: t.join()
+print(f"  {N} threads:   {time.time()-start:.2f}s  (GIL → similar or slower than sequential!)")
+print("  → Use multiprocessing.Pool for CPU-bound parallelism")
+```
+
+### Python — Medium Level
+`ThreadPoolExecutor` for I/O-bound, `ProcessPoolExecutor` for CPU-bound, and `asyncio` for massive single-threaded concurrency — see which model wins for each task type.
+
+```python
+import time
+import asyncio
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+
+def cpu_work(n):
+    return sum(i * i for i in range(n))
+
+def io_work(delay):
+    import time; time.sleep(delay); return delay
+
+async def async_io(delay):
+    await asyncio.sleep(delay)   # Suspend coroutine, event loop runs others
+    return delay
+
+TASKS, N = 4, 2_000_000
+
+def bench(label, fn):
+    t = time.time(); fn()
+    print(f"  {label:<52} {time.time()-t:.2f}s")
+
+if __name__ == "__main__":
+    work, delays = [N] * TASKS, [0.5] * TASKS
+
+    print("CPU-BOUND")
+    bench("Sequential:", lambda: [cpu_work(n) for n in work])
+    with ThreadPoolExecutor(TASKS) as ex:
+        bench("ThreadPoolExecutor (GIL blocked):", lambda: list(ex.map(cpu_work, work)))
+    with ProcessPoolExecutor(TASKS) as ex:
+        bench("ProcessPoolExecutor (no GIL):",     lambda: list(ex.map(cpu_work, work)))
+
+    print("\nI/O-BOUND")
+    bench("Sequential:", lambda: [io_work(d) for d in delays])
+    with ThreadPoolExecutor(TASKS) as ex:
+        bench("ThreadPoolExecutor:",               lambda: list(ex.map(io_work, delays)))
+    bench("asyncio (single thread, cooperative):",
+          lambda: asyncio.run(asyncio.gather(*[async_io(d) for d in delays])))
+
+    print("\nWinner: CPU → ProcessPoolExecutor | I/O → asyncio or ThreadPoolExecutor")
+```
+
+---
+
+## 11. Key Takeaways
 
 - `std::thread t(func, args...)` — create a thread; always call `t.join()` or `t.detach()`
 - `std::mutex` + `lock()`/`unlock()` — basic mutual exclusion; use RAII wrappers to avoid forgetting unlock

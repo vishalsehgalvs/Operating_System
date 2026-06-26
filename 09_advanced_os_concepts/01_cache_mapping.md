@@ -43,6 +43,7 @@ The **hit rate** (% of accesses served from cache) determines how much the cache
 ## 2. Cache Organization Basics
 
 Both cache and main memory are divided into fixed-size chunks:
+
 - **Cache line / cache block:** the smallest unit transferred between RAM and cache (typically 64 bytes on modern CPUs)
 - Main memory has **many more blocks** than cache can hold
 
@@ -54,7 +55,7 @@ A memory address is split into three fields whose sizes depend on the mapping te
 
 ```
   |  Tag  |  Index (Line Number)  |  Block Offset  |
-  
+
   Tag:          Identifies WHICH memory block occupies this cache line
   Index:        Selects WHICH cache line to look in  (direct/set-associative)
   Block Offset: Byte position within the cache line
@@ -94,6 +95,7 @@ To distinguish which of the competing blocks currently occupies a cache line, a 
 $$\text{Tag} = \lfloor \text{Memory Block Number} / \text{Number of Cache Lines} \rfloor$$
 
 Each cache line contains:
+
 ```
   | Valid Bit | Tag | Data (one cache line of bytes) |
 ```
@@ -104,32 +106,32 @@ If a program alternates between blocks 0 and 4, they constantly evict each other
 
 ```
   Access sequence: 0 → 4 → 0 → 4 → 0 → 4 → ...
-  
+
   Cache line 0:
   After access 0:  [Block 0]  ← MISS, load block 0
   After access 4:  [Block 4]  ← MISS, block 4 evicts block 0
   After access 0:  [Block 0]  ← MISS, block 0 evicts block 4
   After access 4:  [Block 4]  ← MISS again...
-  
+
   100% miss rate — despite cache not being full!
 ```
 
 ### Advantages of Direct Mapping
 
-| Advantage | Reason |
-|-----------|--------|
-| Very fast lookup | One calculation → one cache line to check |
-| Simple hardware | No comparison circuits across multiple lines |
-| Predictable access time | Always the same number of steps |
-| Low cost | Minimal logic, small chip area |
+| Advantage               | Reason                                       |
+| ----------------------- | -------------------------------------------- |
+| Very fast lookup        | One calculation → one cache line to check    |
+| Simple hardware         | No comparison circuits across multiple lines |
+| Predictable access time | Always the same number of steps              |
+| Low cost                | Minimal logic, small chip area               |
 
 ### Disadvantages of Direct Mapping
 
-| Disadvantage | Reason |
-|-------------|--------|
-| Conflict misses | Multiple blocks competing for same line |
-| Poor cache utilization | Cache may be empty except for one busy line |
-| Performance varies by access pattern | Unlucky mappings cause thrashing |
+| Disadvantage                         | Reason                                      |
+| ------------------------------------ | ------------------------------------------- |
+| Conflict misses                      | Multiple blocks competing for same line     |
+| Poor cache utilization               | Cache may be empty except for one busy line |
+| Performance varies by access pattern | Unlucky mappings cause thrashing            |
 
 ---
 
@@ -183,37 +185,37 @@ The **tag** in associative mapping stores the **complete** block number (not a p
 
 ### Advantages of Associative Mapping
 
-| Advantage | Reason |
-|-----------|--------|
-| No conflict misses | Any block can go anywhere |
-| Maximum flexibility | All cache lines usable for any data |
-| Higher hit rate | Blocks only evicted when cache is truly full |
-| Works well with any access pattern | No unlucky address collisions |
+| Advantage                          | Reason                                       |
+| ---------------------------------- | -------------------------------------------- |
+| No conflict misses                 | Any block can go anywhere                    |
+| Maximum flexibility                | All cache lines usable for any data          |
+| Higher hit rate                    | Blocks only evicted when cache is truly full |
+| Works well with any access pattern | No unlucky address collisions                |
 
 ### Disadvantages of Associative Mapping
 
-| Disadvantage | Reason |
-|-------------|--------|
-| Expensive hardware | Need CAM comparison circuitry for every line |
-| Higher power consumption | Parallel comparators active on every lookup |
-| Larger chip area | Each line needs a full-width tag comparator |
-| Not practical for large caches | Cost grows linearly with cache size |
+| Disadvantage                   | Reason                                       |
+| ------------------------------ | -------------------------------------------- |
+| Expensive hardware             | Need CAM comparison circuitry for every line |
+| Higher power consumption       | Parallel comparators active on every lookup  |
+| Larger chip area               | Each line needs a full-width tag comparator  |
+| Not practical for large caches | Cost grows linearly with cache size          |
 
 ---
 
 ## 5. Direct vs Associative — Comparison
 
-| Aspect | Direct Mapping | Fully Associative |
-|--------|---------------|-----------------|
-| **Placement Rule** | Fixed: `Block % Cache Lines` | Flexible: any free line |
-| **Search Method** | Direct calculation → one line | Parallel search of all lines (CAM) |
-| **Hardware Complexity** | Simple and cheap | Complex and expensive |
-| **Access Speed** | Very fast (arithmetic only) | Fast but needs CAM |
-| **Conflict Misses** | Common — blocks compete | None — any block goes anywhere |
-| **Cache Utilization** | Can be poor (empty lines unused) | Excellent |
-| **Hit Rate** | Lower (conflicts hurt) | Higher (only capacity misses) |
-| **Tag Size** | Smaller (partial address) | Larger (full block address) |
-| **Best Use Case** | Cost/power-sensitive, simple | High-performance, small cache |
+| Aspect                  | Direct Mapping                   | Fully Associative                  |
+| ----------------------- | -------------------------------- | ---------------------------------- |
+| **Placement Rule**      | Fixed: `Block % Cache Lines`     | Flexible: any free line            |
+| **Search Method**       | Direct calculation → one line    | Parallel search of all lines (CAM) |
+| **Hardware Complexity** | Simple and cheap                 | Complex and expensive              |
+| **Access Speed**        | Very fast (arithmetic only)      | Fast but needs CAM                 |
+| **Conflict Misses**     | Common — blocks compete          | None — any block goes anywhere     |
+| **Cache Utilization**   | Can be poor (empty lines unused) | Excellent                          |
+| **Hit Rate**            | Lower (conflicts hurt)           | Higher (only capacity misses)      |
+| **Tag Size**            | Smaller (partial address)        | Larger (full block address)        |
+| **Best Use Case**       | Cost/power-sensitive, simple     | High-performance, small cache      |
 
 ### Types of Cache Misses
 
@@ -240,6 +242,7 @@ The **tag** in associative mapping stores the **complete** block number (not a p
 Imagine organizing books borrowed from a large library (main memory) on your small home bookshelf (cache).
 
 **Direct mapping — assigned shelf sections:**
+
 ```
   History books → always go on shelf 1
   Science books → always go on shelf 2
@@ -252,6 +255,7 @@ Imagine organizing books borrowed from a large library (main memory) on your sma
 ```
 
 **Associative mapping — any book anywhere:**
+
 ```
   Any book can go on any shelf.
   You use all space efficiently.
@@ -286,14 +290,15 @@ Pure direct or fully associative caches are rare in modern CPUs. The standard is
   Block 8 → goes to Set 0, either Line 0 or Line 1
 ```
 
-| Cache Type | "Ways" (N) | Behavior |
-|-----------|-----------|---------|
-| Direct-mapped | 1-way | Each block has exactly 1 possible slot |
-| 2-way set-associative | 2-way | Each block has 2 possible slots in its set |
-| 4-way set-associative | 4-way | 4 possible slots — fewer conflicts |
-| Fully associative | N-way (N = all lines) | Any block in any slot |
+| Cache Type            | "Ways" (N)            | Behavior                                   |
+| --------------------- | --------------------- | ------------------------------------------ |
+| Direct-mapped         | 1-way                 | Each block has exactly 1 possible slot     |
+| 2-way set-associative | 2-way                 | Each block has 2 possible slots in its set |
+| 4-way set-associative | 4-way                 | 4 possible slots — fewer conflicts         |
+| Fully associative     | N-way (N = all lines) | Any block in any slot                      |
 
 **Typical modern CPU cache configs:**
+
 - L1 cache: 4-way or 8-way set-associative (~32–64 KB)
 - L2 cache: 8-way set-associative (~256 KB – 1 MB)
 - L3 cache: 16-way or 32-way set-associative (~8–64 MB)
@@ -319,7 +324,330 @@ Understanding cache mapping helps you write **cache-friendly** code — especial
 
 ---
 
-## 8. Key Takeaways
+## 8. Code Examples
+
+> Working code that demonstrates cache mapping — direct mapped, set-associative, and TLB — in practice.
+
+### C++ — Simple Version
+Simulate a direct mapped cache: compute slot index from block address, detect hits and misses.
+
+```cpp
+#include <iostream>
+#include <vector>
+
+// Direct Mapped Cache Simulator
+// A cache is a small, fast memory. Each memory block maps to exactly ONE cache slot.
+// Formula: cache_index = block_address % num_cache_lines
+// If the tag in that slot matches, it's a HIT. Otherwise it's a MISS.
+
+struct CacheLine {
+    bool valid = false;   // Is there data stored here?
+    int  tag   = -1;      // Which memory block is stored here?
+};
+
+class DirectMappedCache {
+    int cacheSize;                  // Number of lines in the cache
+    std::vector<CacheLine> lines;   // The actual cache storage
+    int hits = 0, misses = 0;
+
+public:
+    DirectMappedCache(int size) : cacheSize(size), lines(size) {}
+
+    bool access(int blockAddress) {
+        int index = blockAddress % cacheSize;   // Which cache slot?
+        int tag   = blockAddress / cacheSize;   // Which specific block?
+
+        if (lines[index].valid && lines[index].tag == tag) {
+            hits++;
+            std::cout << "  Block " << blockAddress << " -> slot " << index << " -> HIT\n";
+            return true;   // Cache hit!
+        } else {
+            misses++;
+            // Load the block into cache (evicts whatever was there)
+            lines[index].valid = true;
+            lines[index].tag   = tag;
+            std::cout << "  Block " << blockAddress << " -> slot " << index << " -> MISS (loaded)\n";
+            return false;  // Cache miss
+        }
+    }
+
+    void printStats() {
+        int total = hits + misses;
+        std::cout << "\nTotal: " << total
+                  << " | Hits: " << hits
+                  << " | Misses: " << misses
+                  << " | Hit rate: " << (100.0 * hits / total) << "%\n";
+    }
+};
+
+int main() {
+    // Cache with 4 lines. Memory has 16 blocks.
+    DirectMappedCache cache(4);
+
+    // Blocks 0 and 4 BOTH map to slot 0 — they thrash each other (conflict miss!)
+    std::vector<int> accesses = {0, 1, 2, 3, 0, 4, 0, 1, 2, 3};
+
+    std::cout << "Direct Mapped Cache Simulation (4 lines)\n";
+    std::cout << "=========================================\n";
+    for (int block : accesses) {
+        cache.access(block);
+    }
+    cache.printStats();
+
+    return 0;
+}
+```
+
+### C++ — Medium / LeetCode Style
+N-way set-associative cache with LRU replacement, plus a TLB (Translation Lookaside Buffer) simulation.
+
+```cpp
+#include <iostream>
+#include <vector>
+#include <list>
+
+// N-Way Set-Associative Cache with LRU replacement
+// Address layout: [ tag | set_index | block_offset ]
+// Within each set: LRU eviction when all N ways are occupied.
+
+struct CacheLine {
+    bool valid = false;
+    int tag = -1;
+};
+
+class SetAssociativeCache {
+    int numSets, numWays;
+    // Each set is a list of ways — front = most recently used (LRU at back)
+    std::vector<std::list<CacheLine>> sets;
+    int hits = 0, misses = 0;
+
+public:
+    SetAssociativeCache(int sets_, int ways)
+        : numSets(sets_), numWays(ways), sets(sets_) {}
+
+    bool access(int blockAddr) {
+        int setIdx = blockAddr % numSets;   // Which set?
+        int tag    = blockAddr / numSets;   // Tag identifies the block
+        auto& set  = sets[setIdx];
+
+        // Search all ways in this set for a tag match
+        for (auto it = set.begin(); it != set.end(); ++it) {
+            if (it->valid && it->tag == tag) {
+                // HIT — move to front (most recently used)
+                set.splice(set.begin(), set, it);
+                hits++;
+                std::cout << "  Block " << blockAddr << " -> set " << setIdx << " -> HIT\n";
+                return true;
+            }
+        }
+
+        // MISS — load block; evict LRU (back of list) if set is full
+        misses++;
+        if ((int)set.size() >= numWays) {
+            set.pop_back();
+        }
+        set.push_front({true, tag});
+        std::cout << "  Block " << blockAddr << " -> set " << setIdx << " -> MISS\n";
+        return false;
+    }
+
+    void printStats() {
+        int total = hits + misses;
+        std::cout << "Hits: " << hits << " | Misses: " << misses
+                  << " | Hit rate: " << (100.0 * hits / total) << "%\n";
+    }
+};
+
+// TLB — Translation Lookaside Buffer (fully associative, LRU)
+// Maps virtual page number (VPN) -> physical frame number (PFN)
+class TLB {
+    int capacity;
+    std::list<std::pair<int,int>> entries;   // (vpn, pfn) — LRU at back
+    int hits = 0, misses = 0;
+
+public:
+    TLB(int cap) : capacity(cap) {}
+
+    int translate(int vpn, int pfn_from_page_table) {
+        for (auto it = entries.begin(); it != entries.end(); ++it) {
+            if (it->first == vpn) {
+                entries.splice(entries.begin(), entries, it);
+                hits++;
+                std::cout << "  VPN " << vpn << " -> TLB HIT  -> PFN " << it->second << "\n";
+                return it->second;
+            }
+        }
+        // TLB miss — walk page table (simulated by pfn_from_page_table)
+        misses++;
+        if ((int)entries.size() >= capacity) entries.pop_back();
+        entries.push_front({vpn, pfn_from_page_table});
+        std::cout << "  VPN " << vpn << " -> TLB MISS -> PFN " << pfn_from_page_table << " (loaded)\n";
+        return pfn_from_page_table;
+    }
+
+    void printStats() {
+        int total = hits + misses;
+        std::cout << "TLB hits: " << hits << " | misses: " << misses
+                  << " | Hit rate: " << (100.0 * hits / total) << "%\n";
+    }
+};
+
+int main() {
+    std::cout << "=== 2-Way Set-Associative Cache (4 sets) ===\n";
+    SetAssociativeCache cache(4, 2);
+    for (int b : {0, 1, 4, 0, 8, 1, 4, 0, 5}) cache.access(b);
+    cache.printStats();
+
+    std::cout << "\n=== TLB (4-entry, fully associative, LRU) ===\n";
+    TLB tlb(4);
+    // (vpn, pfn) pairs — simulate page table lookups on TLB miss
+    for (auto [vpn, pfn] : std::vector<std::pair<int,int>>{
+            {0,10},{1,20},{2,30},{3,40},{0,10},{4,50},{1,20},{0,10}})
+        tlb.translate(vpn, pfn);
+    tlb.printStats();
+
+    return 0;
+}
+```
+
+### Python — Simple Version
+Direct mapped cache simulation with hit/miss tracking and statistics.
+
+```python
+# Direct Mapped Cache Simulation
+# Each memory block maps to exactly one cache slot: slot = block % cache_size
+# If the block stored in that slot matches what we want -> HIT, else -> MISS
+
+class DirectMappedCache:
+    def __init__(self, size):
+        self.size = size
+        # Each slot: {'valid': bool, 'tag': int or None}
+        self.slots = [{'valid': False, 'tag': None} for _ in range(size)]
+        self.hits = 0
+        self.misses = 0
+
+    def access(self, block_address):
+        slot_index = block_address % self.size     # Which cache slot?
+        tag = block_address // self.size            # Tag identifies the exact block
+
+        slot = self.slots[slot_index]
+
+        if slot['valid'] and slot['tag'] == tag:
+            # Cache hit — data is already in the cache
+            self.hits += 1
+            print(f"  Block {block_address:2d} -> slot {slot_index} -> HIT")
+        else:
+            # Cache miss — load block into cache (evicts whatever was there)
+            self.misses += 1
+            slot['valid'] = True
+            slot['tag'] = tag
+            print(f"  Block {block_address:2d} -> slot {slot_index} -> MISS (tag={tag})")
+
+    def stats(self):
+        total = self.hits + self.misses
+        print(f"\nTotal: {total} | Hits: {self.hits} | Misses: {self.misses} "
+              f"| Hit rate: {100 * self.hits / total:.1f}%")
+
+
+# Demo: 4-slot cache, 16 blocks of memory
+print("Direct Mapped Cache (4 slots)")
+print("==============================")
+cache = DirectMappedCache(size=4)
+
+# Blocks 0 and 4 BOTH map to slot 0 -> they thrash each other (conflict misses)
+access_sequence = [0, 1, 2, 3, 0, 4, 0, 1, 2, 3]
+print(f"Access sequence: {access_sequence}\n")
+for block in access_sequence:
+    cache.access(block)
+
+cache.stats()
+```
+
+### Python — Medium Level
+Set-associative cache with LRU (using `OrderedDict`) plus a fully associative TLB.
+
+```python
+from collections import OrderedDict
+
+# N-Way Set-Associative Cache with LRU replacement
+# Address -> set_index (modulo), tag (integer division)
+# Within each set: LRU eviction when all ways are occupied.
+
+class SetAssociativeCache:
+    def __init__(self, num_sets, num_ways):
+        self.num_sets = num_sets
+        self.num_ways = num_ways
+        # Each set is an OrderedDict {tag: True} — last item = most recently used
+        self.sets = [OrderedDict() for _ in range(num_sets)]
+        self.hits = self.misses = 0
+
+    def access(self, block_addr):
+        set_idx   = block_addr % self.num_sets
+        tag       = block_addr // self.num_sets
+        cache_set = self.sets[set_idx]
+
+        if tag in cache_set:
+            # HIT — promote to most-recently-used position
+            cache_set.move_to_end(tag)
+            self.hits += 1
+            print(f"  Block {block_addr:2d} -> set {set_idx} -> HIT")
+        else:
+            # MISS — evict LRU (first item) if set is full
+            self.misses += 1
+            if len(cache_set) >= self.num_ways:
+                cache_set.popitem(last=False)    # Evict oldest
+            cache_set[tag] = True                # Insert as newest
+            print(f"  Block {block_addr:2d} -> set {set_idx} -> MISS")
+
+    def stats(self):
+        total = self.hits + self.misses
+        print(f"Hits: {self.hits} | Misses: {self.misses} | "
+              f"Hit rate: {100 * self.hits / total:.1f}%")
+
+
+# TLB — fully associative with LRU eviction
+# Maps virtual page number (VPN) -> physical frame number (PFN)
+class TLB:
+    def __init__(self, capacity):
+        self.capacity = capacity
+        self.entries = OrderedDict()   # {vpn: pfn}
+        self.hits = self.misses = 0
+
+    def translate(self, vpn, pfn_from_page_table):
+        if vpn in self.entries:
+            self.entries.move_to_end(vpn)
+            self.hits += 1
+            print(f"  VPN {vpn} -> TLB HIT  -> PFN {self.entries[vpn]}")
+        else:
+            self.misses += 1
+            if len(self.entries) >= self.capacity:
+                self.entries.popitem(last=False)      # Evict LRU
+            self.entries[vpn] = pfn_from_page_table
+            print(f"  VPN {vpn} -> TLB MISS -> PFN {pfn_from_page_table} (page table walk)")
+        return self.entries[vpn]
+
+    def stats(self):
+        total = self.hits + self.misses
+        print(f"TLB: Hits={self.hits} Misses={self.misses} "
+              f"Hit rate={100 * self.hits / total:.1f}%")
+
+
+print("=== 2-Way Set-Associative Cache (4 sets) ===")
+cache = SetAssociativeCache(num_sets=4, num_ways=2)
+for b in [0, 1, 4, 0, 8, 1, 4, 0, 5]:
+    cache.access(b)
+cache.stats()
+
+print("\n=== TLB (4 entries, fully associative, LRU) ===")
+tlb = TLB(capacity=4)
+for vpn, pfn in [(0,10),(1,20),(2,30),(3,40),(0,10),(4,50),(1,20),(0,10)]:
+    tlb.translate(vpn, pfn)
+tlb.stats()
+```
+
+---
+
+## 9. Key Takeaways
 
 - **Cache** is a small, fast memory buffer between CPU and RAM; **cache mapping** decides which RAM block occupies which cache slot
 - **Cache hit** = data found in cache (fast); **cache miss** = must fetch from RAM (slow)

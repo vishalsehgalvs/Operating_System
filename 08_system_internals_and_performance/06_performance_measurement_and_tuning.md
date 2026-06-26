@@ -428,6 +428,489 @@ echo cfq      | sudo tee /sys/block/sda/queue/scheduler   # fair for desktop
 
 ---
 
+## 11. Code Examples
+
+> Working code that demonstrates performance measurement and tuning in practice.
+
+### C++ — Simple Version
+Use `std::chrono` to time and compare operations — array vs linked list sequential access, binary search vs linear search, string copy vs move — shows how to profile code before optimizing.
+
+```cpp
+// Measure and compare the performance of different operations using std::chrono.
+// Key rule of performance tuning: MEASURE FIRST, then optimize.
+// Covers: array vs linked list, sorted vs unsorted search, copy vs move semantics.
+
+#include <iostream>
+#include <vector>
+#include <list>
+#include <algorithm>
+#include <chrono>
+#include <numeric>
+#include <iomanip>
+#include <string>
+
+// ── Timing helper ─────────────────────────────────────────────────────────────
+// Runs fn() reps times and returns the average elapsed time in microseconds.
+template<typename Fn>
+double time_us(Fn fn, int reps = 5) {
+    auto start = std::chrono::high_resolution_clock::now();
+    for (int i = 0; i < reps; ++i) fn();
+    auto end = std::chrono::high_resolution_clock::now();
+    return std::chrono::duration<double, std::micro>(end - start).count() / reps;
+}
+
+void print_row(const std::string& label, double us) {
+    std::cout << "  " << std::left << std::setw(45) << label
+              << std::right << std::setw(10) << std::fixed << std::setprecision(1)
+              << us << " µs\n";
+}
+
+int main() {
+    std::cout << "=== Performance Measurement ===\n\n";
+    const int N = 100'000;
+
+    // ── 1. Array vs Linked List sequential access ─────────────────────────────
+    // vector: elements are contiguous in memory → CPU cache loads 16 ints per cache line
+    // list:   each node is a separate heap allocation → every element = cache miss
+    std::cout << "1. Sequential sum over N=" << N << " elements:\n";
+
+    std::vector<int> arr(N); std::iota(arr.begin(), arr.end(), 0);
+    std::list<int>   lst(arr.begin(), arr.end());
+
+    double t_arr = time_us([&]{
+        volatile long s = 0; for (int x : arr) s += x;
+    }, 20);
+    double t_lst = time_us([&]{
+        volatile long s = 0; for (int x : lst) s += x;
+    }, 20);
+
+    print_row("vector<int> sum  (cache-friendly, contiguous)", t_arr);
+    print_row("list<int> sum    (cache-unfriendly, scattered)", t_lst);
+    std::cout << "  → list is " << std::setprecision(0) << t_lst / t_arr
+              << "x slower (each node = separate cache miss)\n\n";
+
+    // ── 2. Binary search (sorted) vs linear search (unsorted) ─────────────────
+    // Binary search: O(log N) = 17 comparisons for N=100000
+    // Linear search: O(N) = up to 100000 comparisons
+    std::cout << "2. Search (N=" << N << "):\n";
+
+    std::vector<int> sorted_v = arr;   // already sorted 0..N-1
+    std::vector<int> unsorted_v = arr;
+    std::shuffle(unsorted_v.begin(), unsorted_v.end(), std::mt19937{42});
+
+    double t_bin = time_us([&]{
+        volatile bool f = std::binary_search(sorted_v.begin(), sorted_v.end(), N/2);
+    }, 10000);
+    double t_lin = time_us([&]{
+        volatile bool f = (std::find(unsorted_v.begin(), unsorted_v.end(), N/2) != unsorted_v.end());
+    }, 10000);
+
+    print_row("binary_search  (sorted,   O(log N))", t_bin);
+    print_row("linear search  (unsorted, O(N))",     t_lin);
+    std::cout << "  → linear is " << std::setprecision(0) << t_lin / t_bin
+              << "x slower (O(N) vs O(log N))\n\n";
+
+    // ── 3. String copy vs move semantics ──────────────────────────────────────
+    // copy: allocates new heap buffer + copies all bytes → O(N)
+    // move: just swaps the internal pointer → O(1) — no allocation, no copy
+    std::cout << "3. String copy vs move (10 KB string):\n";
+    std::string big(10'000, 'X');
+
+    double t_copy = time_us([&]{
+        std::string c = big;         // deep copy: new allocation + memcpy
+        volatile char x = c[0];
+    }, 50000);
+    double t_move = time_us([&]{
+        std::string tmp = big;
+        std::string m = std::move(tmp);   // O(1): swap internal pointers only
+        volatile char x = m[0];
+    }, 50000);
+
+    print_row("std::string copy  (new alloc + memcpy, O(N))", t_copy);
+    print_row("std::move         (pointer swap only, O(1))",   t_move);
+    std::cout << "  → copy is " << std::setprecision(1) << t_copy / t_move
+              << "x slower than move\n\n";
+
+    std::cout << "Key takeaway: always measure before optimizing — results may surprise you!\n";
+    return 0;
+}
+```
+
+### C++ — Medium / LeetCode Style
+Function call profiler that tracks call counts and durations per function, plus a cache-friendly vs cache-unfriendly matrix traversal benchmark that demonstrates why memory access patterns matter.
+
+```cpp
+// Part 1: Lightweight function profiler — wraps any callable, records timing per function name.
+//         Reports sorted by total time (hottest functions first) — like gprof or perf.
+// Part 2: Cache access pattern benchmark — row-major vs column-major matrix traversal.
+//         Demonstrates why memory layout matters as much as algorithm complexity.
+
+#include <iostream>
+#include <string>
+#include <unordered_map>
+#include <chrono>
+#include <functional>
+#include <vector>
+#include <numeric>
+#include <iomanip>
+#include <algorithm>
+
+// ── PART 1: Function Profiler ─────────────────────────────────────────────────
+
+struct Stats {
+    long long calls    = 0;
+    double    total_us = 0.0;
+    double    min_us   = 1e18;
+    double    max_us   = 0.0;
+    double    avg_us() const { return calls ? total_us / calls : 0.0; }
+};
+
+class Profiler {
+    std::unordered_map<std::string, Stats> data;
+
+public:
+    // Profile any callable — call this in place of the direct function call
+    template<typename Fn>
+    auto measure(const std::string& name, Fn fn) {
+        auto t0 = std::chrono::high_resolution_clock::now();
+        auto result = fn();
+        double us = std::chrono::duration<double, std::micro>(
+            std::chrono::high_resolution_clock::now() - t0).count();
+
+        auto& s = data[name];
+        s.calls++;
+        s.total_us += us;
+        s.min_us    = std::min(s.min_us, us);
+        s.max_us    = std::max(s.max_us, us);
+        return result;
+    }
+
+    void report() {
+        std::cout << "\n=== Profiler Report (sorted by total time) ===\n";
+        std::cout << std::left  << std::setw(28) << "Function"
+                  << std::right << std::setw(8)  << "Calls"
+                  << std::setw(12) << "Total µs"
+                  << std::setw(10) << "Avg µs"
+                  << std::setw(9)  << "Min µs"
+                  << std::setw(9)  << "Max µs" << "\n";
+        std::cout << std::string(78, '-') << "\n";
+
+        std::vector<std::pair<std::string, Stats>> sorted(data.begin(), data.end());
+        std::sort(sorted.begin(), sorted.end(),
+            [](const auto& a, const auto& b){ return a.second.total_us > b.second.total_us; });
+
+        for (const auto& [name, s] : sorted) {
+            std::cout << std::left  << std::setw(28) << name
+                      << std::right << std::setw(8)  << s.calls
+                      << std::setw(12) << std::fixed << std::setprecision(1) << s.total_us
+                      << std::setw(10) << s.avg_us()
+                      << std::setw(9)  << s.min_us
+                      << std::setw(9)  << s.max_us << "\n";
+        }
+    }
+};
+
+// ── PART 2: Cache-Friendly vs Cache-Unfriendly Matrix Traversal ───────────────
+// A C++ 2D array is stored in ROW-MAJOR order: arr[0][0], arr[0][1], ..., arr[0][N-1], arr[1][0]...
+// Row-major access: reads consecutive memory locations → hits cache line each time → fast
+// Column-major access: jumps N elements between reads → every access is a fresh cache line → slow
+
+static const int N = 1000;
+
+double sum_row_major(int mat[N][N]) {
+    double s = 0;
+    for (int i = 0; i < N; ++i)
+        for (int j = 0; j < N; ++j)
+            s += mat[i][j];   // consecutive memory → cache hit every 16 elements
+    return s;
+}
+
+double sum_col_major(int mat[N][N]) {
+    double s = 0;
+    for (int j = 0; j < N; ++j)
+        for (int i = 0; i < N; ++i)
+            s += mat[i][j];   // jumps 1000 ints = 4000 bytes between reads → cache miss
+    return s;
+}
+
+int main() {
+    // ── Profiler demo ─────────────────────────────────────────────────────────
+    Profiler prof;
+    std::vector<int> data(1000);
+    std::iota(data.begin(), data.end(), 0);
+
+    for (int i = 0; i < 1000; ++i) {
+        prof.measure("linear_search", [&]{
+            return (int)(std::find(data.begin(), data.end(), 500) != data.end());
+        });
+        prof.measure("sort_copy", [&]{
+            auto v = data; std::sort(v.begin(), v.end()); return (int)v.size();
+        });
+    }
+    for (int i = 0; i < 5000; ++i) {
+        prof.measure("binary_search", [&]{
+            return (int)std::binary_search(data.begin(), data.end(), 500);
+        });
+    }
+    prof.report();
+
+    // ── Cache benchmark ────────────────────────────────────────────────────────
+    static int mat[N][N];
+    for (int i = 0; i < N; ++i) for (int j = 0; j < N; ++j) mat[i][j] = i*N+j;
+
+    auto time_fn = [](auto fn, int reps=5) {
+        auto t0 = std::chrono::high_resolution_clock::now();
+        volatile double x = 0;
+        for (int i = 0; i < reps; ++i) x += fn();
+        return std::chrono::duration<double, std::micro>(
+            std::chrono::high_resolution_clock::now() - t0).count() / reps;
+    };
+
+    double t_row = time_fn([&]{ return sum_row_major(mat); });
+    double t_col = time_fn([&]{ return sum_col_major(mat); });
+
+    std::cout << "\n=== Cache Access Patterns (" << N << "x" << N << " matrix) ===\n";
+    std::cout << std::fixed << std::setprecision(0);
+    std::cout << "  Row-major (cache-friendly):    " << t_row << " µs\n";
+    std::cout << "  Column-major (cache-hostile):  " << t_col << " µs\n";
+    std::cout << "  Column-major is " << std::setprecision(1) << t_col / t_row << "x slower\n";
+    std::cout << "  (Both compute the same sum — difference is purely memory access pattern)\n";
+    return 0;
+}
+```
+
+### Python — Simple Version
+Measure and compare common Python operation pairs using `time.perf_counter()` — list vs tuple, dict lookup vs linear search, `+=` vs `join`, for-loop vs list comprehension.
+
+```python
+# Measure and compare the performance of common Python operations.
+# Use time.perf_counter() for high-resolution wall-clock timing.
+# Rule: MEASURE FIRST before assuming what's slow.
+
+import time
+
+def measure(label: str, fn, reps: int = 100_000) -> float:
+    """Run fn() reps times and return the average time in microseconds."""
+    start = time.perf_counter()
+    for _ in range(reps):
+        fn()
+    elapsed_us = (time.perf_counter() - start) * 1_000_000 / reps
+    print(f"  {label:<50s} {elapsed_us:8.3f} µs")
+    return elapsed_us
+
+if __name__ == "__main__":
+    print("=== Python Performance Measurement ===\n")
+    N = 1_000
+
+    # ── 1. List vs Tuple indexed access ──────────────────────────────────────
+    # Tuples are immutable; Python stores them more compactly and accesses them faster.
+    print("1. Indexed access:")
+    lst   = list(range(N))
+    tup   = tuple(range(N))
+    t_lst = measure("list[500]   (mutable)",                lambda: lst[500])
+    t_tup = measure("tuple[500]  (immutable, no overhead)", lambda: tup[500])
+    print(f"    → tuple is {t_lst/t_tup:.1f}x faster for indexing\n")
+
+    # ── 2. Dict lookup vs list linear search ──────────────────────────────────
+    # Dict: hash table → O(1) average.  List: linear scan → O(N).
+    print("2. Membership test (N=1000):")
+    d    = {i: i for i in range(N)}
+    t_d  = measure("500 in dict  (hash lookup, O(1))",        lambda: 500 in d)
+    t_l  = measure("500 in list  (linear scan, O(N))",        lambda: 500 in lst)
+    print(f"    → dict is {t_l/t_d:.0f}x faster for membership test\n")
+
+    # ── 3. String concatenation: += vs join ───────────────────────────────────
+    # Each += creates a NEW string object (Python strings are immutable) → O(n²) total.
+    # join() builds once from a list → O(n).
+    print("3. String building (100 words):")
+    words = ["hello"] * 100
+
+    def concat_plus():
+        s = ""
+        for w in words: s += w   # creates new string each iteration
+        return s
+
+    def concat_join():
+        return "".join(words)    # allocates once, copies once
+
+    t_plus = measure("str += in loop  (O(n²) allocations)",  concat_plus, reps=10_000)
+    t_join = measure("''.join(words)  (O(n), single alloc)", concat_join, reps=10_000)
+    print(f"    → join is {t_plus/t_join:.1f}x faster\n")
+
+    # ── 4. List comprehension vs explicit for-loop ────────────────────────────
+    # Comprehensions run the loop body in optimized C bytecode (LOAD_FAST, LIST_APPEND).
+    # Explicit append() loops go through the Python bytecode interpreter for each call.
+    print("4. List building (N=1000 elements):")
+    data = list(range(N))
+
+    t_comp = measure("[x*2 for x in data]     (comprehension)", lambda: [x*2 for x in data], reps=10_000)
+
+    def loop_version():
+        result = []
+        for x in data: result.append(x * 2)
+        return result
+
+    t_loop = measure("for x in data: result.append(x*2)", loop_version, reps=10_000)
+    print(f"    → comprehension is {t_loop/t_comp:.1f}x faster\n")
+
+    print("  Key insight: always MEASURE before optimizing — intuition is often wrong!")
+```
+
+### Python — Medium Level
+Profiler decorator that tracks call count and timing per function plus a cache-friendly vs cache-unfriendly matrix access benchmark — the two most practical performance engineering tools.
+
+```python
+# Part 1: @profile decorator — measures every call to a decorated function.
+#         Report shows hottest functions (most total time) and most-called functions.
+# Part 2: Cache-friendly vs cache-unfriendly matrix access — row-major vs column-major.
+#         Shows why memory access ORDER matters as much as algorithm complexity.
+
+import time
+import functools
+from collections import defaultdict
+from dataclasses import dataclass, field
+
+# ── PART 1: Profiler ──────────────────────────────────────────────────────────
+
+@dataclass
+class Stats:
+    calls:    int   = 0
+    total_us: float = 0.0
+    min_us:   float = float("inf")
+    max_us:   float = 0.0
+
+    @property
+    def avg_us(self): return self.total_us / self.calls if self.calls else 0.0
+
+# Global registry: function name → Stats
+_registry: dict[str, Stats] = defaultdict(Stats)
+
+def profile(fn=None, *, name=None):
+    """
+    Decorator: @profile  or  @profile(name='label')
+    Every call is timed and accumulated into _registry.
+    """
+    if fn is None:                        # called as @profile(name='...')
+        return lambda f: profile(f, name=name)
+
+    label = name or fn.__qualname__
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        t0 = time.perf_counter()
+        result = fn(*args, **kwargs)
+        us = (time.perf_counter() - t0) * 1_000_000
+
+        s = _registry[label]
+        s.calls    += 1
+        s.total_us += us
+        s.min_us    = min(s.min_us, us)
+        s.max_us    = max(s.max_us, us)
+        return result
+
+    return wrapper
+
+def print_profile_report():
+    """Print profiler stats sorted by total time (hottest first)."""
+    print("\n=== Profiler Report ===")
+    print(f"  {'Function':<32} {'Calls':>7} {'Total µs':>10} {'Avg µs':>9} {'Min µs':>8} {'Max µs':>8}")
+    print("  " + "─" * 78)
+    for name, s in sorted(_registry.items(), key=lambda kv: kv[1].total_us, reverse=True):
+        print(f"  {name:<32} {s.calls:>7} {s.total_us:>10.1f} {s.avg_us:>9.2f} {s.min_us:>8.2f} {s.max_us:>8.2f}")
+
+
+# ── Profiled functions ─────────────────────────────────────────────────────────
+@profile
+def linear_search(lst: list, target: int) -> bool:
+    return target in lst                     # O(N) scan
+
+@profile
+def binary_search(lst: list, target: int) -> bool:
+    lo, hi = 0, len(lst) - 1
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        if   lst[mid] == target: return True
+        elif lst[mid] < target:  lo = mid + 1
+        else:                    hi = mid - 1
+    return False
+
+@profile
+def sort_copy(lst: list) -> list:
+    return sorted(lst)                       # O(N log N)
+
+@profile(name="string_join")
+def build_string(words: list) -> str:
+    return "".join(words)                    # O(N)
+
+
+# ── PART 2: Cache-Friendly vs Cache-Unfriendly Matrix Access ──────────────────
+# Python stores list-of-lists as a list of row objects.
+# Row-major: accesses each row sequentially — relatively cache-friendly.
+# Col-major: jumps between row objects — each mat[i][j] dereferences a different object.
+
+@profile(name="sum_row_major")
+def sum_row_major(mat: list[list[int]]) -> int:
+    """Access row-by-row (inner loop over columns — sequential per row)."""
+    total = 0
+    for row in mat:
+        for val in row:
+            total += val
+    return total
+
+@profile(name="sum_col_major")
+def sum_col_major(mat: list[list[int]]) -> int:
+    """Access column-by-column (inner loop over rows — jumps between row objects)."""
+    total = 0
+    n = len(mat)
+    for j in range(n):
+        for i in range(n):
+            total += mat[i][j]   # each mat[i] is a separate Python list object
+    return total
+
+
+if __name__ == "__main__":
+    import random
+
+    N = 1_000
+    data    = list(range(N))
+    sorted_ = sorted(data)
+    random.shuffle(data)
+    words   = ["performance"] * 200
+
+    print("=== Running profiled workloads ===")
+    for _ in range(500):
+        linear_search(data, N // 2)
+        binary_search(sorted_, N // 2)
+    for _ in range(100):
+        sort_copy(data[:])
+        build_string(words)
+
+    # ── Cache benchmark ────────────────────────────────────────────────────────
+    print("Running cache access pattern benchmark...")
+    SIZE = 200
+    mat  = [[i * SIZE + j for j in range(SIZE)] for i in range(SIZE)]
+    for _ in range(30):
+        sum_row_major(mat)
+        sum_col_major(mat)
+
+    print_profile_report()
+
+    # Summary insights
+    row_s = _registry["sum_row_major"]
+    col_s = _registry["sum_col_major"]
+    ratio = col_s.avg_us / row_s.avg_us if row_s.avg_us else 0
+    print(f"\n  Cache insight: column-major is {ratio:.1f}x slower than row-major")
+    print(f"  (both compute the same sum — only the access ORDER differs)")
+
+    hottest     = max(_registry.items(), key=lambda kv: kv[1].total_us)[0]
+    most_called = max(_registry.items(), key=lambda kv: kv[1].calls)[0]
+    print(f"\n  Hottest function (most CPU time): {hottest}")
+    print(f"  Most-called function:             {most_called}")
+    print(f"\n  → Fix the hottest function first for maximum performance gain!")
+```
+
+---
+
 ## 12. Key Takeaways
 
 - **Performance measurement** = collecting metrics on CPU, memory, disk, network; needed before any tuning

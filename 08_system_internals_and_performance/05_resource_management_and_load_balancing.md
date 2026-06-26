@@ -383,6 +383,461 @@ Moving a process between CPUs isn't free:
 
 ---
 
+## 10. Code Examples
+
+> Working code that demonstrates resource management and load balancing in practice.
+
+### C++ — Simple Version
+Simulate a load balancer with three strategies: Round Robin, Least Connections, and Random — shows which server handles each request and how load distributes.
+
+```cpp
+// Simulate a load balancer with 3 classic strategies.
+// Round Robin: cycle through servers in order (simple, fair).
+// Least Connections: always pick the server with fewest active requests (best for uneven load).
+// Random: pick a server at random (simple, works at scale).
+
+#include <iostream>
+#include <string>
+#include <vector>
+#include <algorithm>
+#include <random>
+#include <iomanip>
+
+// ── Server ────────────────────────────────────────────────────────────────────
+struct Server {
+    std::string name;
+    int active = 0;    // currently active connections
+    int total  = 0;    // total requests served (for reporting)
+};
+
+// ── Load Balancer ─────────────────────────────────────────────────────────────
+class LoadBalancer {
+    std::vector<Server> servers;
+    int rr_index = 0;                    // round-robin counter
+    std::mt19937 rng{42};               // fixed seed for reproducible output
+
+public:
+    void add_server(const std::string& name) {
+        servers.push_back({name});
+    }
+
+    // ── Round Robin: cycle in order ──────────────────────────────────────────
+    Server* round_robin() {
+        Server* s = &servers[rr_index % servers.size()];
+        rr_index++;
+        return s;
+    }
+
+    // ── Least Connections: pick server with fewest active connections ─────────
+    Server* least_connections() {
+        return &*std::min_element(servers.begin(), servers.end(),
+            [](const Server& a, const Server& b){ return a.active < b.active; });
+    }
+
+    // ── Random: pick any server uniformly at random ───────────────────────────
+    Server* random_pick() {
+        std::uniform_int_distribution<int> dist(0, (int)servers.size() - 1);
+        return &servers[dist(rng)];
+    }
+
+    // Route a request using the chosen strategy
+    void route(const std::string& req, const std::string& strategy) {
+        Server* s = nullptr;
+        if      (strategy == "round_robin")       s = round_robin();
+        else if (strategy == "least_connections") s = least_connections();
+        else if (strategy == "random")            s = random_pick();
+        else { std::cout << "Unknown strategy\n"; return; }
+
+        s->active++;
+        s->total++;
+        std::cout << "  [" << std::setw(18) << strategy << "]  "
+                  << std::setw(25) << req << " → " << s->name
+                  << "  (active=" << s->active << ")\n";
+
+        // Simulate some requests completing
+        if (s->active > 2) s->active--;
+    }
+
+    void report() {
+        std::cout << "  Summary:";
+        for (const auto& s : servers)
+            std::cout << "  " << s.name << "(total=" << s.total << " active=" << s.active << ")";
+        std::cout << "\n";
+    }
+};
+
+int main() {
+    std::cout << "=== Load Balancer Simulation ===\n\n";
+
+    std::vector<std::string> requests = {
+        "GET /home", "GET /api/user", "POST /login",
+        "GET /images/logo", "GET /api/products",
+        "POST /checkout", "GET /about"
+    };
+
+    for (const std::string& strategy : {"round_robin", "least_connections", "random"}) {
+        std::cout << "--- " << strategy << " ---\n";
+        LoadBalancer lb;
+        lb.add_server("srv-A");
+        lb.add_server("srv-B");
+        lb.add_server("srv-C");
+        for (const auto& req : requests) lb.route(req, strategy);
+        lb.report();
+        std::cout << "\n";
+    }
+
+    return 0;
+}
+```
+
+### C++ — Medium / LeetCode Style
+Resource pool scheduler (assign tasks to nodes based on CPU/memory availability) plus LeetCode #621 Task Scheduler (minimum time to finish tasks with a per-type cooling period).
+
+```cpp
+// Part 1: Resource pool — assign tasks to servers using First Fit bin packing.
+//         Each server has CPU and memory limits; reject tasks that don't fit anywhere.
+// Part 2: LeetCode #621 Task Scheduler — greedy max-heap approach.
+//         Given tasks [A,A,A,B,B,B] and cooldown n, find minimum total execution time.
+
+#include <iostream>
+#include <string>
+#include <vector>
+#include <queue>
+#include <unordered_map>
+#include <algorithm>
+#include <iomanip>
+
+// ── Task ──────────────────────────────────────────────────────────────────────
+struct Task {
+    std::string name;
+    int cpu_pct;    // % of one CPU core required
+    int mem_mb;     // MB of RAM required
+};
+
+// ── Server node ───────────────────────────────────────────────────────────────
+struct Node {
+    std::string              name;
+    int                      cpu_total, mem_total;
+    int                      cpu_used = 0, mem_used = 0;
+    std::vector<std::string> running_tasks;
+
+    bool can_fit(const Task& t) const {
+        return (cpu_used + t.cpu_pct <= cpu_total) &&
+               (mem_used + t.mem_mb  <= mem_total);
+    }
+    void assign(const Task& t) {
+        cpu_used += t.cpu_pct;
+        mem_used += t.mem_mb;
+        running_tasks.push_back(t.name);
+    }
+};
+
+// ── Resource Pool Scheduler (First Fit) ──────────────────────────────────────
+void schedule_pool(std::vector<Node>& nodes, const std::vector<Task>& tasks) {
+    std::cout << "=== Resource Pool — First Fit Scheduling ===\n\n";
+    for (const auto& task : tasks) {
+        std::cout << "Task \"" << task.name << "\" (CPU=" << task.cpu_pct
+                  << "% MEM=" << task.mem_mb << "MB)\n";
+        bool placed = false;
+        for (auto& node : nodes) {
+            if (node.can_fit(task)) {
+                node.assign(task);
+                std::cout << "  → " << node.name
+                          << "  CPU " << node.cpu_used << "/" << node.cpu_total << "%"
+                          << "  MEM " << node.mem_used << "/" << node.mem_total << "MB\n";
+                placed = true;
+                break;
+            }
+        }
+        if (!placed) std::cout << "  → REJECTED: no node has enough free resources!\n";
+    }
+    std::cout << "\n  Cluster status:\n";
+    for (const auto& n : nodes) {
+        std::cout << "  " << std::setw(10) << n.name
+                  << " CPU=" << n.cpu_used << "/" << n.cpu_total << "%"
+                  << "  MEM=" << n.mem_used << "/" << n.mem_total << "MB"
+                  << "  tasks=[";
+        for (size_t i = 0; i < n.running_tasks.size(); ++i) {
+            std::cout << n.running_tasks[i];
+            if (i + 1 < n.running_tasks.size()) std::cout << ",";
+        }
+        std::cout << "]\n";
+    }
+}
+
+// ── LeetCode #621: Task Scheduler ────────────────────────────────────────────
+// Greedy: in each window of n+1 slots, pick the most-frequent remaining tasks.
+// If we run out of tasks before filling the window, idle slots fill the gap.
+int task_scheduler(std::vector<char>& tasks, int n) {
+    std::unordered_map<char, int> freq;
+    for (char t : tasks) freq[t]++;
+
+    std::priority_queue<int> pq;  // max-heap of remaining counts
+    for (auto& [ch, cnt] : freq) pq.push(cnt);
+
+    int time = 0;
+    while (!pq.empty()) {
+        std::vector<int> window;
+        for (int i = 0; i <= n && !pq.empty(); ++i) {
+            window.push_back(pq.top() - 1);
+            pq.pop();
+            time++;
+        }
+        // Idle slots if fewer than n+1 tasks available (only matters for last window)
+        if (!pq.empty()) time += (n + 1 - (int)window.size());
+        for (int cnt : window) if (cnt > 0) pq.push(cnt);
+    }
+    return time;
+}
+
+int main() {
+    // ── Resource pool ─────────────────────────────────────────────────────────
+    std::vector<Node> nodes = {
+        {"node-1", 100, 4096},
+        {"node-2", 100, 4096},
+        {"node-3", 100, 4096},
+    };
+    std::vector<Task> tasks = {
+        {"web-server",   30, 512 },
+        {"db-primary",   60, 2048},
+        {"cache",        20, 1024},
+        {"analytics",    80, 3000},   // large memory requirement
+        {"log-ingester", 15, 256 },
+        {"ml-training",  95, 4000},   // too large for any single node
+    };
+    schedule_pool(nodes, tasks);
+
+    // ── LeetCode #621 ─────────────────────────────────────────────────────────
+    std::cout << "\n=== LeetCode #621: Task Scheduler ===\n\n";
+
+    struct Case { std::vector<char> tasks; int n; std::string note; };
+    std::vector<Case> cases = {
+        {{'A','A','A','B','B','B'}, 2, "A→B→idle→A→B→idle→A→B"},
+        {{'A','A','A','B','B','B'}, 0, "AAABBB (no cooldown)"},
+        {{'A','A','A','A','A','A','B','C','D','E','F','G'}, 2, "A dominates"},
+    };
+    for (auto& c : cases) {
+        std::string s(c.tasks.begin(), c.tasks.end());
+        std::sort(s.begin(), s.end());
+        std::cout << "  tasks=" << s << "  n=" << c.n
+                  << "  min_time=" << task_scheduler(c.tasks, c.n)
+                  << "  (" << c.note << ")\n";
+    }
+    return 0;
+}
+```
+
+### Python — Simple Version
+Simulate a load balancer with Round Robin, Least Connections, and Random strategies — shows how each request is routed and how load distributes across three servers.
+
+```python
+# Simulate a load balancer with 3 classic strategies.
+# Round Robin: cycle through servers in fixed order — simple, equal distribution.
+# Least Connections: always send to the least-loaded server — better for uneven work.
+# Random: pick a server randomly — simple, effective at scale.
+
+import random
+
+class Server:
+    def __init__(self, name: str):
+        self.name   = name
+        self.active = 0   # currently active connections
+        self.total  = 0   # total requests served
+
+    def __repr__(self):
+        return f"{self.name}(active={self.active}, total={self.total})"
+
+class LoadBalancer:
+    def __init__(self, servers: list[Server]):
+        self.servers  = servers
+        self._rr_idx  = 0
+
+    def round_robin(self) -> Server:
+        """Cycle through servers in fixed order — O(1), simple, fair."""
+        s = self.servers[self._rr_idx % len(self.servers)]
+        self._rr_idx += 1
+        return s
+
+    def least_connections(self) -> Server:
+        """Pick the server with fewest active connections — best for uneven load."""
+        return min(self.servers, key=lambda s: s.active)
+
+    def random_pick(self) -> Server:
+        """Pick a random server — simple, works well when servers are homogeneous."""
+        return random.choice(self.servers)
+
+    def route(self, request: str, strategy: str) -> Server:
+        strategy_map = {
+            "round_robin":       self.round_robin,
+            "least_connections": self.least_connections,
+            "random":            self.random_pick,
+        }
+        if strategy not in strategy_map:
+            raise ValueError(f"Unknown strategy: {strategy}")
+
+        s = strategy_map[strategy]()
+        s.active += 1
+        s.total  += 1
+
+        print(f"  [{strategy:18s}]  {request:25s} → {s.name}  (active={s.active})")
+
+        # Simulate some requests completing
+        if s.active > 2:
+            s.active -= 1
+
+        return s
+
+    def report(self):
+        print("  Summary:", " | ".join(str(s) for s in self.servers))
+
+
+if __name__ == "__main__":
+    random.seed(42)
+    requests = [
+        "GET /home", "GET /api/user", "POST /login",
+        "GET /images/logo", "GET /api/products",
+        "POST /checkout", "GET /about",
+    ]
+
+    print("=== Load Balancer Simulation ===\n")
+
+    for strategy in ["round_robin", "least_connections", "random"]:
+        print(f"--- {strategy.replace('_', ' ').title()} ---")
+        servers = [Server("srv-A"), Server("srv-B"), Server("srv-C")]
+        lb = LoadBalancer(servers)
+        for req in requests:
+            lb.route(req, strategy)
+        lb.report()
+        print()
+```
+
+### Python — Medium Level
+Resource pool with CPU/memory limits (First Fit bin packing) plus LeetCode #621 Task Scheduler solved with a greedy max-heap approach.
+
+```python
+# Part 1: Resource pool — assign tasks to cluster nodes using First Fit.
+#         Nodes have CPU % and memory MB limits; tasks are rejected if nothing fits.
+# Part 2: LeetCode #621 Task Scheduler — find minimum time to finish all tasks
+#         given a cooldown n between tasks of the same type (greedy max-heap).
+
+import heapq
+from collections import Counter
+from dataclasses import dataclass, field
+
+# ── Resource Pool ─────────────────────────────────────────────────────────────
+@dataclass
+class Task:
+    name:    str
+    cpu_pct: int   # % of one CPU core
+    mem_mb:  int   # MB of RAM
+
+@dataclass
+class Node:
+    name:       str
+    cpu_total:  int
+    mem_total:  int
+    cpu_used:   int  = 0
+    mem_used:   int  = 0
+    tasks:      list = field(default_factory=list)
+
+    @property
+    def cpu_free(self): return self.cpu_total - self.cpu_used
+    @property
+    def mem_free(self): return self.mem_total - self.mem_used
+
+    def can_fit(self, t: Task) -> bool:
+        return t.cpu_pct <= self.cpu_free and t.mem_mb <= self.mem_free
+
+    def assign(self, t: Task):
+        self.cpu_used += t.cpu_pct
+        self.mem_used += t.mem_mb
+        self.tasks.append(t.name)
+
+def schedule_pool(nodes: list[Node], tasks: list[Task]):
+    print("=== Resource Pool — First Fit Scheduling ===\n")
+    for task in tasks:
+        print(f"  Task '{task.name}' (CPU={task.cpu_pct}% MEM={task.mem_mb}MB)")
+        placed = False
+        for node in nodes:
+            if node.can_fit(task):
+                node.assign(task)
+                bar = lambda used, total: "█" * (used * 10 // total) + "░" * (10 - used * 10 // total)
+                print(f"    → {node.name}  CPU [{bar(node.cpu_used, node.cpu_total)}] {node.cpu_used}/{node.cpu_total}%"
+                      f"  MEM [{bar(node.mem_used, node.mem_total)}] {node.mem_used}/{node.mem_total}MB")
+                placed = True
+                break
+        if not placed:
+            print(f"    → REJECTED: no node has enough free resources!")
+
+    print("\n  Cluster status:")
+    for node in nodes:
+        print(f"    {node.name:<10}  CPU={node.cpu_used}/{node.cpu_total}%"
+              f"  MEM={node.mem_used}/{node.mem_total}MB  tasks={node.tasks}")
+
+
+# ── LeetCode #621: Task Scheduler ─────────────────────────────────────────────
+# Greedy insight: in each window of n+1 slots, always schedule the most frequent
+# remaining task type. If fewer task types remain than slots, fill with idle time.
+# Time O(N log k) where N = total tasks, k = distinct task types.
+def task_scheduler(tasks: list[str], n: int) -> int:
+    freq = Counter(tasks)
+    # Python heapq is min-heap; negate counts for max-heap behavior
+    heap = [-cnt for cnt in freq.values()]
+    heapq.heapify(heap)
+
+    time = 0
+    while heap:
+        window = []
+        # Fill one cooldown window (n+1 slots)
+        for _ in range(n + 1):
+            if heap:
+                window.append(heapq.heappop(heap))
+
+        time += n + 1   # full window length
+
+        # Re-add tasks that still have remaining count
+        for cnt in window:
+            if cnt + 1 < 0:   # cnt is negative; cnt+1 means one fewer remaining
+                heapq.heappush(heap, cnt + 1)
+
+        # Last window may be incomplete — remove trailing idle slots
+        if not heap:
+            time -= (n + 1 - len(window))
+
+    return time
+
+
+if __name__ == "__main__":
+    # ── Resource pool ─────────────────────────────────────────────────────────
+    nodes = [
+        Node("node-1", cpu_total=100, mem_total=4096),
+        Node("node-2", cpu_total=100, mem_total=4096),
+        Node("node-3", cpu_total=100, mem_total=4096),
+    ]
+    tasks = [
+        Task("web-server",   cpu_pct=30, mem_mb=512 ),
+        Task("db-primary",   cpu_pct=60, mem_mb=2048),
+        Task("cache",        cpu_pct=20, mem_mb=1024),
+        Task("analytics",    cpu_pct=80, mem_mb=3000),   # large memory
+        Task("log-ingester", cpu_pct=15, mem_mb=256 ),
+        Task("ml-training",  cpu_pct=95, mem_mb=4000),   # too large for any node
+    ]
+    schedule_pool(nodes, tasks)
+
+    # ── Task Scheduler ────────────────────────────────────────────────────────
+    print("\n=== LeetCode #621: Task Scheduler ===\n")
+    cases = [
+        (list("AAABBB"),    2, "A→B→idle→A→B→idle→A→B = 8"),
+        (list("AAABBB"),    0, "AAABBB = 6 (no cooldown)"),
+        (list("AAAAABCDE"), 2, "A dominates: 13"),
+    ]
+    for tasks_in, n, note in cases:
+        result = task_scheduler(tasks_in, n)
+        print(f"  tasks={''.join(sorted(tasks_in))}  n={n}  → min_time={result}  ({note})")
+```
+
+---
+
 ## 11. Key Takeaways
 
 - **Resource management** = OS controls CPU time, memory, I/O, storage; goals are fairness, efficiency, responsiveness, throughput, no starvation

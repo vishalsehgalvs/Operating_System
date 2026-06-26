@@ -49,14 +49,48 @@ A self-reference tutorial for Operating System concepts written in plain English
   09_dynamic_linking_vs_dynamic_loading.md      # Dynamic linking and loading differences
 
 05_file_systems/
+  01_file_system_basics.md                     # File system basics and key components
+  02_fat_ntfs_ext4.md                          # FAT, NTFS, and ext4 file system comparison
+  03_file_allocation_methods.md                # Contiguous, linked, and indexed allocation
+  04_fcb_vs_acl_permissions.md                 # File Control Block vs Access Control List
+  05_file_system_security.md                   # File system security and access control
+  06_file_system_encryption.md                 # File system encryption techniques
+  07_file_system_journaling.md                 # Journaling for crash recovery
+  08_backup_and_recovery.md                    # Backup strategies and recovery methods
 
 06_disk_management_and_storage/
+  01_disk_scheduling_and_structure.md          # Disk structure and scheduling goals
+  02_disk_scheduling_algorithms.md             # FCFS, SSTF, SCAN, C-SCAN, LOOK
+  03_raid_levels.md                            # RAID 0 through RAID 6 explained
+  04_spooling_and_swap_space.md                # Spooling and swap space management
 
 07_inter_process_communication/
+  01_ipc_message_passing_vs_shared_memory.md   # IPC models: message passing vs shared memory
+  02_pipes_vs_named_pipes.md                   # Pipes and named pipes
+  03_signal_handling.md                        # Signal handling in OS
+  04_thread_safety_vs_reentrancy.md            # Thread safety and reentrancy
 
 08_system_internals_and_performance/
+  01_system_calls.md                           # System calls: types, uses, examples
+  02_booting_process.md                        # Booting process from power-on to OS
+  03_hardware_vs_software_interrupts.md        # Hardware vs software interrupts
+  04_event_driven_programming.md               # Event-driven programming in OS
+  05_resource_management_and_load_balancing.md # Resource management and load balancing
+  06_performance_measurement_and_tuning.md     # OS performance measurement and tuning
 
 09_advanced_os_concepts/
+  01_cache_mapping.md                          # Cache mapping: direct vs associative
+  02_virtual_machines_and_hypervisors.md       # Virtual machines and hypervisors
+  03_nfs_network_file_system.md                # NFS: network file system
+  04_containers_and_virtualization.md          # Containers and OS-level virtualization
+  05_os_security.md                            # Operating system security
+  06_future_os_trends.md                       # Future OS trends and innovations
+
+threads_and_parallelism/
+  01_concepts_concurrency_and_parallelism.md   # Concurrency vs parallelism concepts
+  02_threads_in_cpp.md                         # Thread creation and management in C++
+  03_threads_in_python.md                      # Thread creation and management in Python
+  04_parallel_processing_vs_threads.md         # Parallel processing vs threading comparison
 ```
 
 ---
@@ -146,3 +180,8 @@ Every file follows the same format:
 | 59                                             | Containers and OS-Level Virtualization    | ✅     |
 | 60                                             | Operating System Security                 | ✅     |
 | 61                                             | Future Operating Systems and Trends       | ✅     |
+| **Bonus — Threads and Parallelism**            |                                           |        |
+| 62                                             | Concurrency vs Parallelism                | ✅     |
+| 63                                             | Threads in C++                            | ✅     |
+| 64                                             | Threads in Python                         | ✅     |
+| 65                                             | Parallel Processing vs Threads            | ✅     |

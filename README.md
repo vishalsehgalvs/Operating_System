@@ -16,10 +16,37 @@ A self-reference tutorial for Operating System concepts written in plain English
   06_distributed_clustered_embedded_os.md     # Distributed, Clustered, and Embedded OS
 
 02_process_management/
+  01_process_states.md                       # Process concept, 5 states, state transitions
+  02_process_control_block.md                # PCB structure and what the OS tracks per process
+  03_context_switching.md                    # How the OS saves and restores process state
+  04_user_mode_vs_kernel_mode.md             # Privilege levels and mode switching
+  05_scheduling_queues_and_schedulers.md     # Ready queue, I/O queue, short/mid/long-term schedulers
+  06_preemptive_vs_non_preemptive.md         # Scheduling types and their trade-offs
+  07_cpu_scheduling_fcfs_sjf_srtf.md         # FCFS, SJF, SRTF algorithms explained
+  08_cpu_scheduling_advanced.md              # Round Robin, Priority, HRRN, MLQ
+  09_threads_in_os.md                        # Thread concept, benefits, and types
+  10_user_vs_kernel_threads.md               # Multithreading models: many-to-one, one-to-one, many-to-many
 
 03_synchronization_and_concurrency/
+  01_process_synchronization.md             # Race conditions, mutual exclusion, synchronization goals
+  02_critical_section_problem.md            # Critical section, Peterson's solution
+  03_mutex_vs_semaphore.md                  # Mutex and semaphore types with examples
+  04_producer_consumer_problem.md           # Classic sync problem solved with semaphores
+  05_deadlock_in_os.md                      # Deadlock conditions, prevention, avoidance, detection
+  06_bankers_algorithm.md                   # Deadlock avoidance using Banker's algorithm
+  07_starvation_and_aging.md               # Starvation causes and aging solution
+  08_priority_inversion.md                  # Priority inversion problem and fixes
 
 04_memory_management/
+  01_memory_management_and_address_binding.md  # Memory mgmt goals, address types, binding types, MMU, swapping
+  02_first_fit_best_fit_worst_fit.md            # Contiguous allocation strategies and fragmentation
+  03_paging_vs_segmentation.md                  # Paging, segmentation, and hybrid schemes
+  04_virtual_memory_and_demand_paging.md        # Virtual memory concept and demand paging
+  05_page_fault_handling.md                     # Page fault lifecycle and OS response
+  06_page_replacement_algorithms.md             # FIFO, LRU, Optimal algorithms
+  07_beladys_anomaly.md                         # More frames causing more faults
+  08_thrashing_and_working_set_model.md         # Thrashing causes and working set fix
+  09_dynamic_linking_vs_dynamic_loading.md      # Dynamic linking and loading differences
 
 05_file_systems/
 
@@ -47,20 +74,75 @@ Every file follows the same format:
 
 ## Topics Covered
 
-| #                                             | Topic                                          | Status |
-| --------------------------------------------- | ---------------------------------------------- | ------ |
-| **Section 1 — Basics of Operating Systems**   |                                                |        |
-| 1                                             | OS Explained: Purpose and Objectives           | ✅     |
-| 2                                             | Process vs Program vs Thread                   | ⬜     |
-| 3                                             | Types of Operating Systems                     | ⬜     |
-| 4                                             | Batch, Multiprogramming & Multitasking OS      | ⬜     |
-| 5                                             | Multiprocessing & Real-Time OS (RTOS)          | ⬜     |
-| 6                                             | Distributed, Clustered & Embedded OS           | ⬜     |
-| **Section 2 — Process Management**            |                                                |        |
-| **Section 3 — Synchronization & Concurrency** |                                                |        |
-| **Section 4 — Memory Management**             |                                                |        |
-| **Section 5 — File Systems**                  |                                                |        |
-| **Section 6 — Disk Management & Storage**     |                                                |        |
-| **Section 7 — Inter-Process Communication**   |                                                |        |
-| **Section 8 — System Internals & Performance**|                                                |        |
-| **Section 9 — Advanced OS Concepts**          |                                                |        |
+| #                                              | Topic                                     | Status |
+| ---------------------------------------------- | ----------------------------------------- | ------ |
+| **Section 1 — Basics of Operating Systems**    |                                           |        |
+| 1                                              | OS Explained: Purpose and Objectives      | ✅     |
+| 2                                              | Process vs Program vs Thread              | ✅     |
+| 3                                              | Types of Operating Systems                | ✅     |
+| 4                                              | Batch, Multiprogramming & Multitasking OS | ✅     |
+| 5                                              | Multiprocessing & Real-Time OS (RTOS)     | ✅     |
+| 6                                              | Distributed, Clustered & Embedded OS      | ✅     |
+| **Section 2 — Process Management**             |                                           |        |
+| 7                                              | Process States                            | ✅     |
+| 8                                              | Process Control Block (PCB)               | ✅     |
+| 9                                              | Context Switching                         | ✅     |
+| 10                                             | User Mode vs Kernel Mode                  | ✅     |
+| 11                                             | Scheduling Queues & Schedulers            | ✅     |
+| 12                                             | Preemptive vs Non-Preemptive Scheduling   | ✅     |
+| 13                                             | CPU Scheduling: FCFS, SJF & SRTF          | ✅     |
+| 14                                             | Advanced CPU Scheduling: HRRN to MLQ      | ✅     |
+| 15                                             | Threads in OS                             | ✅     |
+| 16                                             | User vs Kernel Threads                    | ✅     |
+| **Section 3 — Synchronization & Concurrency**  |                                           |        |
+| 17                                             | Process Synchronization                   | ✅     |
+| 18                                             | Critical Section Problem                  | ✅     |
+| 19                                             | Mutex vs Semaphore                        | ✅     |
+| 20                                             | Producer-Consumer Problem                 | ✅     |
+| 21                                             | Deadlock in OS                            | ✅     |
+| 22                                             | Banker's Algorithm                        | ✅     |
+| 23                                             | Process Starvation and Aging              | ✅     |
+| 24                                             | Priority Inversion                        | ✅     |
+| **Section 4 — Memory Management**              |                                           |        |
+| 25                                             | Memory Management and Address Binding     | ✅     |
+| 26                                             | First Fit vs Best Fit vs Worst Fit        | ✅     |
+| 27                                             | Paging vs Segmentation in OS              | ✅     |
+| 28                                             | Virtual Memory and Demand Paging          | ✅     |
+| 29                                             | Page Fault Handling                       | ✅     |
+| 30                                             | Page Replacement Algorithms               | ✅     |
+| 31                                             | Belady's Anomaly                          | ✅     |
+| 32                                             | Thrashing in OS: Working Set Model        | ✅     |
+| 33                                             | Dynamic Linking vs Dynamic Loading        | ✅     |
+| **Section 5 — File Systems**                   |                                           |        |
+| 34                                             | File System Basics and Key Components     | ✅     |
+| 35                                             | File Systems: FAT, NTFS, ext4             | ✅     |
+| 36                                             | File Allocation Methods                   | ✅     |
+| 37                                             | FCB vs ACL: File Metadata and Permissions | ✅     |
+| 38                                             | File System Security and Access Control   | ✅     |
+| 39                                             | File System Encryption                    | ✅     |
+| 40                                             | File System Journaling                    | ✅     |
+| 41                                             | Backup and Recovery in OS                 | ✅     |
+| **Section 6 — Disk Management & Storage**      |                                           |        |
+| 42                                             | Disk Scheduling and Structure             | ✅     |
+| 43                                             | Disk Scheduling Algorithms                | ✅     |
+| 44                                             | RAID Levels                               | ✅     |
+| 45                                             | Spooling and Swap Space Management        | ✅     |
+| **Section 7 — Inter-Process Communication**    |                                           |        |
+| 46                                             | IPC: Message Passing vs Shared Memory     | ✅     |
+| 47                                             | Pipes vs Named Pipes                      | ✅     |
+| 48                                             | Signal Handling in OS                     | ✅     |
+| 49                                             | Thread Safety vs Reentrancy               | ✅     |
+| **Section 8 — System Internals & Performance** |                                           |        |
+| 50                                             | System Calls: Types, Uses, Examples       | ✅     |
+| 51                                             | Booting Process: Power-On to OS           | ✅     |
+| 52                                             | Hardware vs Software Interrupts           | ✅     |
+| 53                                             | Event-Driven Programming in OS            | ✅     |
+| 54                                             | OS Resource Management and Load Balancing | ✅     |
+| 55                                             | OS Performance Measurement and Tuning     | ✅     |
+| **Section 9 — Advanced OS Concepts**           |                                           |        |
+| 56                                             | Cache Mapping: Direct vs Associative      | ✅     |
+| 57                                             | Virtual Machines and Hypervisors          | ✅     |
+| 58                                             | NFS: Network File System                  | ✅     |
+| 59                                             | Containers and OS-Level Virtualization    | ✅     |
+| 60                                             | Operating System Security                 | ✅     |
+| 61                                             | Future Operating Systems and Trends       | ✅     |

@@ -369,6 +369,481 @@ void periodic_update(Event* e) {
 
 ---
 
+## 9. Code Examples
+
+> Working code that demonstrates event-driven programming in practice.
+
+### C++ — Simple Version
+Implement a simple event loop — event queue, four event types (TIMER, IO_READY, USER_INPUT, QUIT), register one handler per type, dispatch events FIFO.
+
+```cpp
+// Simple event loop: register handlers for event types, post events to a FIFO queue,
+// run the loop — it dequeues events and dispatches to the registered handler.
+// Models how a GUI framework (Qt, GTK) or game loop works internally.
+
+#include <iostream>
+#include <functional>
+#include <unordered_map>
+#include <queue>
+#include <string>
+#include <vector>
+
+// ── Event types ───────────────────────────────────────────────────────────────
+enum class EventType {
+    TIMER,        // periodic tick — used for animations, timeouts
+    IO_READY,     // a file descriptor / socket has data ready to read
+    USER_INPUT,   // keyboard or mouse event
+    QUIT,         // application should exit
+};
+
+std::string to_str(EventType t) {
+    switch (t) {
+        case EventType::TIMER:      return "TIMER";
+        case EventType::IO_READY:   return "IO_READY";
+        case EventType::USER_INPUT: return "USER_INPUT";
+        case EventType::QUIT:       return "QUIT";
+    }
+    return "?";
+}
+
+// ── Event ─────────────────────────────────────────────────────────────────────
+struct Event {
+    EventType   type;
+    std::string data;   // payload: key pressed, file name, message, etc.
+};
+
+// ── Event handler type ────────────────────────────────────────────────────────
+using Handler = std::function<void(const Event&)>;
+
+// ── Event Loop ────────────────────────────────────────────────────────────────
+class EventLoop {
+    std::queue<Event>                    queue;      // FIFO event buffer
+    std::unordered_map<int, Handler>     handlers;   // EventType (as int) → callback
+    bool                                 running = false;
+
+public:
+    // Register a callback for an event type (only one handler per type here)
+    void on(EventType type, Handler h) {
+        handlers[static_cast<int>(type)] = h;
+        std::cout << "  Registered handler for " << to_str(type) << "\n";
+    }
+
+    // Post an event to the queue — non-blocking, just enqueues it
+    void post(EventType type, const std::string& data = "") {
+        queue.push({type, data});
+    }
+
+    // Run the loop until QUIT is received or queue is empty
+    void run() {
+        running = true;
+        std::cout << "\n--- Event loop started ---\n";
+
+        while (running && !queue.empty()) {
+            Event ev = queue.front();    // take the next event (FIFO order)
+            queue.pop();
+
+            std::cout << "\n[loop] event: " << to_str(ev.type);
+            if (!ev.data.empty()) std::cout << " (\"" << ev.data << "\")";
+            std::cout << "\n";
+
+            auto it = handlers.find(static_cast<int>(ev.type));
+            if (it != handlers.end()) {
+                it->second(ev);          // call registered handler
+            } else {
+                std::cout << "  [loop] no handler — event dropped\n";
+            }
+
+            if (ev.type == EventType::QUIT) running = false;
+        }
+
+        std::cout << "\n--- Event loop stopped ---\n";
+    }
+};
+
+int main() {
+    std::cout << "=== Simple Event Loop ===\n\n";
+    EventLoop loop;
+
+    // Register event handlers (callbacks registered before the loop starts)
+    loop.on(EventType::TIMER, [](const Event&) {
+        std::cout << "  [handler] TIMER: update animation frame, check scheduled tasks\n";
+    });
+    loop.on(EventType::IO_READY, [](const Event& e) {
+        std::cout << "  [handler] IO_READY: reading data from \"" << e.data << "\"\n";
+    });
+    loop.on(EventType::USER_INPUT, [](const Event& e) {
+        std::cout << "  [handler] USER_INPUT: key pressed = '" << e.data << "'\n";
+    });
+    loop.on(EventType::QUIT, [](const Event&) {
+        std::cout << "  [handler] QUIT: saving state, releasing resources\n";
+    });
+
+    // Post events (simulating what OS / devices / user would generate)
+    loop.post(EventType::TIMER);
+    loop.post(EventType::USER_INPUT, "H");
+    loop.post(EventType::USER_INPUT, "i");
+    loop.post(EventType::IO_READY,   "socket:8080");
+    loop.post(EventType::TIMER);
+    loop.post(EventType::IO_READY,   "file:data.txt");
+    loop.post(EventType::QUIT);
+
+    loop.run();
+    return 0;
+}
+```
+
+### C++ — Medium / LeetCode Style
+Non-blocking I/O event loop — single thread monitors multiple "sockets" using select()-style readiness; timers fire at scheduled ticks; shows how Node.js and nginx handle many connections without blocking.
+
+```cpp
+// Single-threaded non-blocking I/O event loop.
+// One thread monitors many file descriptors (fds) for readiness — like epoll/select().
+// No thread blocks waiting for one fd; instead, the loop checks all fds each tick.
+// This is the core pattern behind Node.js, nginx, Redis, and most async servers.
+
+#include <iostream>
+#include <functional>
+#include <unordered_map>
+#include <queue>
+#include <vector>
+#include <string>
+#include <memory>
+
+// ── Simulated file descriptor (socket / file) ─────────────────────────────────
+struct FD {
+    int                  id;
+    std::string          label;            // human-readable name
+    std::queue<std::string> buffer;        // data waiting to be read
+    bool                 closed = false;
+};
+
+// ── Timer (like setTimeout in JavaScript) ─────────────────────────────────────
+struct Timer {
+    int  fire_at_tick;
+    int  id;
+    std::function<void()> callback;
+    bool operator>(const Timer& o) const { return fire_at_tick > o.fire_at_tick; }
+};
+
+// ── Non-blocking event loop ────────────────────────────────────────────────────
+class EventLoop {
+    std::unordered_map<int, FD>                  fds;
+    std::unordered_map<int, std::function<void(int, const std::string&)>> read_cbs;
+    std::unordered_map<int, std::function<void(int)>>                     close_cbs;
+    std::priority_queue<Timer, std::vector<Timer>, std::greater<Timer>>   timers;
+
+    int next_fd    = 3;   // 0=stdin, 1=stdout, 2=stderr
+    int next_timer = 0;
+    int tick       = 0;
+
+public:
+    int register_fd(const std::string& label) {
+        int id = next_fd++;
+        fds[id] = {id, label};
+        std::cout << "  EventLoop: watching fd=" << id << " (" << label << ")\n";
+        return id;
+    }
+
+    void on_readable(int fd, std::function<void(int, const std::string&)> cb) {
+        read_cbs[fd] = cb;
+    }
+    void on_close(int fd, std::function<void(int)> cb) {
+        close_cbs[fd] = cb;
+    }
+
+    // Inject data into a fd (simulates network packet / file data arriving)
+    void push_data(int fd, const std::string& data) {
+        if (fds.count(fd)) fds[fd].buffer.push(data);
+    }
+    void close_fd(int fd) {
+        if (fds.count(fd)) fds[fd].closed = true;
+    }
+
+    // Schedule a callback after delay_ticks ticks (like setTimeout)
+    void set_timeout(int delay_ticks, std::function<void()> cb) {
+        timers.push({tick + delay_ticks, next_timer++, cb});
+    }
+
+    // The event loop — one iteration per "tick" (like a select()/epoll() cycle)
+    void run(int max_ticks = 8) {
+        std::cout << "\n--- Non-blocking I/O event loop started ---\n";
+
+        for (; tick < max_ticks; ++tick) {
+            std::cout << "\n[tick=" << tick << "] epoll_wait() — polling readiness\n";
+            bool idle = true;
+
+            // 1. Fire due timers
+            while (!timers.empty() && timers.top().fire_at_tick <= tick) {
+                Timer t = timers.top(); timers.pop();
+                std::cout << "  [timer] timer#" << t.id << " fired\n";
+                t.callback();
+                idle = false;
+            }
+
+            // 2. Check which fds are readable (like epoll returning ready fds)
+            for (auto& [id, fd] : fds) {
+                if (!fd.buffer.empty() && read_cbs.count(id)) {
+                    std::string data = fd.buffer.front(); fd.buffer.pop();
+                    std::cout << "  [epoll] fd=" << id << " (" << fd.label << ") READABLE\n";
+                    read_cbs[id](id, data);
+                    idle = false;
+                }
+                if (fd.closed && close_cbs.count(id)) {
+                    std::cout << "  [epoll] fd=" << id << " (" << fd.label << ") CLOSED\n";
+                    close_cbs[id](id);
+                    close_cbs.erase(id);
+                    idle = false;
+                }
+            }
+
+            if (idle) std::cout << "  [loop]  nothing ready — thread sleeps (epoll blocks)\n";
+        }
+
+        std::cout << "\n--- Event loop ended ---\n";
+    }
+};
+
+int main() {
+    std::cout << "=== Non-Blocking I/O Event Loop ===\n\n";
+    EventLoop loop;
+
+    // Register multiple client connections (like a web server accepting connections)
+    int c1 = loop.register_fd("client-1");
+    int c2 = loop.register_fd("client-2");
+    int c3 = loop.register_fd("client-3");
+
+    // Register handlers — called only when a fd is readable (no blocking wait!)
+    loop.on_readable(c1, [](int, const std::string& d){ std::cout << "    [handler] c1: " << d << " → send 200 OK\n"; });
+    loop.on_readable(c2, [](int, const std::string& d){ std::cout << "    [handler] c2: " << d << " → validate credentials\n"; });
+    loop.on_readable(c3, [](int, const std::string& d){ std::cout << "    [handler] c3: " << d << " → query database\n"; });
+    loop.on_close(c2,    [](int fd){ std::cout << "    [handler] c2 disconnected (fd=" << fd << ")\n"; });
+
+    // Schedule data to arrive asynchronously at different ticks
+    loop.set_timeout(1, [&]{ loop.push_data(c1, "GET /index.html HTTP/1.1"); });
+    loop.set_timeout(2, [&]{ loop.push_data(c2, "POST /login {user:'alice'}"); });
+    loop.set_timeout(3, [&]{ loop.push_data(c3, "GET /api/data?limit=10"); });
+    loop.set_timeout(4, [&]{ loop.push_data(c1, "GET /style.css"); });
+    loop.set_timeout(5, [&]{ loop.close_fd(c2); });
+
+    loop.run(7);
+    return 0;
+}
+```
+
+### Python — Simple Version
+Implement a simple event loop with four event types, FIFO dispatch, and registered handler callbacks — shows the three core components: event source, event queue, event loop.
+
+```python
+# Simple event loop: register handlers for event types, post events to a FIFO queue,
+# run the loop — it dispatches each event to its registered handler.
+# Models how GUIs, game engines, and embedded systems process events.
+
+from collections import deque
+from enum import Enum, auto
+
+# ── Event types ───────────────────────────────────────────────────────────────
+class EventType(Enum):
+    TIMER      = auto()   # periodic tick
+    IO_READY   = auto()   # file/socket has data ready
+    USER_INPUT = auto()   # keyboard or mouse input
+    QUIT       = auto()   # application should exit
+
+# ── Event ─────────────────────────────────────────────────────────────────────
+class Event:
+    def __init__(self, etype: EventType, data: str = ""):
+        self.type = etype
+        self.data = data
+
+# ── Event Loop ────────────────────────────────────────────────────────────────
+class EventLoop:
+    def __init__(self):
+        # FIFO queue — events processed in arrival order (same source preserves order)
+        self.queue:    deque[Event]              = deque()
+        # Handler map — one callback registered per event type
+        self.handlers: dict[EventType, callable] = {}
+
+    def on(self, etype: EventType, handler: callable):
+        """Register a callback that runs when etype occurs."""
+        self.handlers[etype] = handler
+        print(f"  Registered handler for {etype.name}")
+
+    def post(self, etype: EventType, data: str = ""):
+        """Add an event to the queue — non-blocking, returns immediately."""
+        self.queue.append(Event(etype, data))
+
+    def run(self):
+        """
+        Main event loop:
+        - Block until an event is ready (here: just process queue)
+        - Dispatch to handler
+        - Repeat until QUIT
+        In a real OS, this blocks in epoll_wait() / WaitForSingleObject() to save CPU.
+        """
+        print("\n--- Event loop started ---")
+        while self.queue:
+            ev = self.queue.popleft()   # FIFO
+
+            data_str = f' ("{ev.data}")' if ev.data else ""
+            print(f"\n[loop] event: {ev.type.name}{data_str}")
+
+            handler = self.handlers.get(ev.type)
+            if handler:
+                handler(ev)
+            else:
+                print("  [loop] no handler registered — event ignored")
+
+            if ev.type == EventType.QUIT:
+                print("  [loop] QUIT received — stopping")
+                break
+
+        print("\n--- Event loop stopped ---")
+
+if __name__ == "__main__":
+    print("=== Simple Event Loop ===\n")
+    loop = EventLoop()
+
+    # Register handlers (callbacks — called when each event type fires)
+    loop.on(EventType.TIMER,      lambda e: print("  [handler] TIMER: animate frame, check timeouts"))
+    loop.on(EventType.IO_READY,   lambda e: print(f"  [handler] IO_READY: reading from \"{e.data}\""))
+    loop.on(EventType.USER_INPUT, lambda e: print(f"  [handler] USER_INPUT: key='{e.data}'"))
+    loop.on(EventType.QUIT,       lambda e: print("  [handler] QUIT: saving state, cleanup"))
+
+    # Post events (as if the OS/devices/user generated them)
+    loop.post(EventType.TIMER)
+    loop.post(EventType.USER_INPUT, "H")
+    loop.post(EventType.USER_INPUT, "i")
+    loop.post(EventType.IO_READY,   "socket:8080")
+    loop.post(EventType.TIMER)
+    loop.post(EventType.IO_READY,   "file:data.txt")
+    loop.post(EventType.QUIT)
+
+    loop.run()
+```
+
+### Python — Medium Level
+Non-blocking I/O event loop — single thread monitors multiple file descriptors for readiness using a timer-driven select()-style model; shows how Node.js-style async works.
+
+```python
+# Single-threaded non-blocking I/O event loop — simulates epoll()/select().
+# One thread monitors many "sockets" simultaneously without blocking on any of them.
+# Data arrives asynchronously via scheduled timers; handlers run only when fd is readable.
+# This is the foundation of Node.js, nginx, Redis, asyncio (Python), and libuv.
+
+import heapq
+from collections import deque
+from dataclasses import dataclass, field
+from typing import Callable
+
+# ── Simulated file descriptor ─────────────────────────────────────────────────
+@dataclass
+class FD:
+    fd_num:  int
+    label:   str
+    buffer:  deque = field(default_factory=deque)   # queued incoming data
+    closed:  bool  = False
+
+# ── Timer (like setTimeout / setInterval) ─────────────────────────────────────
+@dataclass
+class Timer:
+    fire_at:  int
+    timer_id: int
+    callback: Callable = field(compare=False, repr=False)
+    def __lt__(self, o): return (self.fire_at, self.timer_id) < (o.fire_at, o.timer_id)
+
+# ── Non-blocking event loop ────────────────────────────────────────────────────
+class EventLoop:
+    def __init__(self):
+        self._fds:       dict[int, FD]       = {}
+        self._read_cbs:  dict[int, Callable] = {}
+        self._close_cbs: dict[int, Callable] = {}
+        self._timers:    list[Timer]         = []   # min-heap by fire_at
+        self._next_fd    = 3
+        self._next_timer = 0
+        self.tick        = 0
+
+    def register_fd(self, label: str) -> int:
+        fd = self._next_fd; self._next_fd += 1
+        self._fds[fd] = FD(fd, label)
+        print(f"  EventLoop: watching fd={fd} ({label})")
+        return fd
+
+    def on_readable(self, fd: int, cb: Callable): self._read_cbs[fd]  = cb
+    def on_close(self,    fd: int, cb: Callable): self._close_cbs[fd] = cb
+
+    def push_data(self, fd: int, data: str):
+        """Inject data into an fd (simulates OS kernel writing received data)."""
+        if fd in self._fds: self._fds[fd].buffer.append(data)
+
+    def close_fd(self, fd: int):
+        if fd in self._fds: self._fds[fd].closed = True
+
+    def set_timeout(self, delay_ticks: int, cb: Callable):
+        """Schedule a callback to fire after delay_ticks ticks (like setTimeout)."""
+        heapq.heappush(self._timers, Timer(self.tick + delay_ticks, self._next_timer, cb))
+        self._next_timer += 1
+
+    def run(self, max_ticks: int = 8):
+        """
+        Main event loop body — one iteration per tick:
+        1. Fire any timers due at this tick
+        2. Check each fd for readiness (like epoll_wait() returning ready events)
+        3. If nothing is ready → sleep until next timer or I/O event
+        """
+        print("\n--- Non-blocking I/O event loop ---")
+        while self.tick < max_ticks:
+            print(f"\n[tick={self.tick}] epoll_wait() — polling readiness")
+            idle = True
+
+            # Step 1: fire due timers
+            while self._timers and self._timers[0].fire_at <= self.tick:
+                t = heapq.heappop(self._timers)
+                print(f"  [timer]  timer#{t.timer_id} fired")
+                t.callback()
+                idle = False
+
+            # Step 2: check fd readiness (like epoll returning EPOLLIN events)
+            for fd_num, fd in list(self._fds.items()):
+                if fd.buffer and fd_num in self._read_cbs:
+                    data = fd.buffer.popleft()
+                    print(f"  [epoll]  fd={fd_num} ({fd.label}) READABLE")
+                    self._read_cbs[fd_num](fd_num, data)
+                    idle = False
+                if fd.closed and fd_num in self._close_cbs:
+                    print(f"  [epoll]  fd={fd_num} ({fd.label}) CLOSED")
+                    self._close_cbs.pop(fd_num)(fd_num)
+                    idle = False
+
+            if idle:
+                print("  [loop]   nothing ready — thread sleeps (epoll blocks, CPU idle)")
+            self.tick += 1
+        print("\n--- Event loop ended ---")
+
+if __name__ == "__main__":
+    print("=== Non-Blocking I/O Event Loop ===\n")
+    loop = EventLoop()
+
+    # Simulate a web server: one thread, many client connections
+    c1 = loop.register_fd("client-1 (GET /index)")
+    c2 = loop.register_fd("client-2 (POST /login)")
+    c3 = loop.register_fd("client-3 (GET /api)")
+
+    loop.on_readable(c1, lambda fd, d: print(f"    [handler] c1: {d} → send 200 OK"))
+    loop.on_readable(c2, lambda fd, d: print(f"    [handler] c2: {d} → validate credentials"))
+    loop.on_readable(c3, lambda fd, d: print(f"    [handler] c3: {d} → query DB"))
+    loop.on_close(c2,    lambda fd:    print(f"    [handler] c2 disconnected (fd={fd})"))
+
+    # Data arrives asynchronously — scheduled by timers (like OS waking loop on I/O)
+    loop.set_timeout(1, lambda: loop.push_data(c1, "GET /index.html HTTP/1.1"))
+    loop.set_timeout(2, lambda: loop.push_data(c2, "POST /login {user:'alice'}"))
+    loop.set_timeout(3, lambda: loop.push_data(c3, "GET /api/data?limit=10"))
+    loop.set_timeout(4, lambda: loop.push_data(c1, "GET /style.css"))
+    loop.set_timeout(5, lambda: loop.close_fd(c2))
+
+    loop.run(max_ticks=7)
+```
+
+---
+
 ## 10. Key Takeaways
 
 - **Event-driven programming** = execution flow determined by events, not a preset sequence; OS registers handlers for event types and dispatches them as events arrive

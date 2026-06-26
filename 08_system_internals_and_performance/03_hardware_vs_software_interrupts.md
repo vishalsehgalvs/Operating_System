@@ -360,6 +360,448 @@ Interrupts are the primary mechanism enabling **preemptive multitasking**.
 
 ---
 
+## 9. Code Examples
+
+> Working code that demonstrates hardware and software interrupts in practice.
+
+### C++ — Simple Version
+Simulate an interrupt controller with an interrupt vector table (IVT) — hardware interrupt (timer fires every 10 ms) and software interrupts (syscall trap, page fault, divide-by-zero).
+
+```cpp
+// Simulate an interrupt controller with an Interrupt Vector Table (IVT).
+// IVT maps interrupt vector number → ISR (Interrupt Service Routine).
+// Hardware interrupts: arrive from devices (timer, keyboard) at any time — asynchronous.
+// Software interrupts: triggered by executing an instruction (INT 0x80, DIV /0) — synchronous.
+
+#include <iostream>
+#include <functional>
+#include <unordered_map>
+#include <string>
+#include <vector>
+
+// ── Simulated CPU state (saved on every interrupt) ────────────────────────────
+struct CPUState {
+    int         pc   = 2000;   // program counter — address of next instruction
+    int         sp   = 0xFFFF; // stack pointer
+    std::string mode = "USER"; // current privilege level: USER or KERNEL
+};
+
+// ── ISR type ──────────────────────────────────────────────────────────────────
+using ISR = std::function<void()>;
+
+// ── Interrupt Vector Table (IVT) ──────────────────────────────────────────────
+// x86 IDT: 256 entries, each maps a vector number to a gate descriptor → ISR address.
+std::unordered_map<int, std::pair<std::string, ISR>> ivt;
+
+void register_handler(int vector, const std::string& name, ISR handler) {
+    ivt[vector] = {name, handler};
+    std::cout << "  IVT[" << vector << "] = " << name << "\n";
+}
+
+// ── Fire an interrupt ─────────────────────────────────────────────────────────
+// CPU interrupt sequence:
+//   1. Finish current instruction (interrupts are not checked mid-instruction)
+//   2. Push EFLAGS, CS, EIP onto kernel stack (saves return address and flags)
+//   3. Load IDT entry for vector → jump to ISR in kernel mode
+//   4. ISR runs (interrupts temporarily disabled on same or lower priority line)
+//   5. ISR sends EOI (End Of Interrupt) to PIC, then executes IRET
+//   6. IRET pops EIP, CS, EFLAGS → CPU resumes where it was interrupted
+void fire_interrupt(int vector, CPUState& cpu, const std::string& source) {
+    std::cout << "\n" << std::string(54, '─') << "\n";
+    std::cout << "INTERRUPT vector=" << vector << "  source: " << source << "\n";
+
+    if (!ivt.count(vector)) {
+        std::cout << "  [CPU] No handler for vector " << vector
+                  << " → double fault → triple fault → system reset!\n";
+        return;
+    }
+
+    auto& [name, handler] = ivt.at(vector);
+
+    // Step 1: Save state (hardware does this automatically on x86)
+    int saved_pc = cpu.pc;
+    std::cout << "  [CPU] Saving state: PC=" << cpu.pc
+              << " SP=" << std::hex << cpu.sp << std::dec << " mode=" << cpu.mode << "\n";
+
+    // Step 2: Switch to kernel mode
+    cpu.mode = "KERNEL";
+    std::cout << "  [CPU] Mode switch: USER → KERNEL (ring 3 → ring 0)\n";
+    std::cout << "  [CPU] Jumping to ISR: " << name << "\n";
+
+    // Step 3: Run ISR
+    handler();
+
+    // Step 4: Restore state (IRET instruction)
+    cpu.pc   = saved_pc;
+    cpu.mode = "USER";
+    std::cout << "  [CPU] IRET: PC=" << cpu.pc << " mode=" << cpu.mode << " (resumed)\n";
+}
+
+int main() {
+    std::cout << "=== Interrupt Controller Simulation ===\n\n";
+
+    // Build the IVT (like kernel startup: installing ISRs into the IDT)
+    std::cout << "Registering ISRs:\n";
+    register_handler(0,   "Divide-by-Zero (#DE)",
+        []{ std::cout << "    [ISR] SIGFPE → process will crash or handle the signal\n"; });
+    register_handler(6,   "Invalid Opcode (#UD)",
+        []{ std::cout << "    [ISR] SIGILL → invalid instruction executed\n"; });
+    register_handler(14,  "Page Fault (#PF)",
+        []{ std::cout << "    [ISR] OS loads missing page from disk → process resumes transparently\n"; });
+    register_handler(32,  "Timer IRQ0 (PIT, 10ms)",
+        []{ std::cout << "    [ISR] Timer tick → decrement time slice → call scheduler\n"; });
+    register_handler(33,  "Keyboard IRQ1",
+        []{ std::cout << "    [ISR] Scancode 0x1E ('A') → pushed to keyboard input buffer\n"; });
+    register_handler(44,  "Mouse IRQ12",
+        []{ std::cout << "    [ISR] Mouse delta (dx=3, dy=-2) → pushed to mouse event queue\n"; });
+    register_handler(128, "Syscall (INT 0x80)",
+        []{ std::cout << "    [ISR] sys_write(1, buf, 5) → kernel writes to stdout → 5 bytes\n"; });
+
+    std::cout << "\n";
+    CPUState cpu;
+
+    // ── Hardware interrupts (asynchronous — fired by devices, not by program) ──
+    std::cout << "=== Hardware Interrupts (asynchronous) ===";
+    fire_interrupt(32,  cpu, "PIT chip fires every 10ms (preemption clock)");
+    fire_interrupt(33,  cpu, "Keyboard controller: user pressed 'A'");
+    fire_interrupt(44,  cpu, "Mouse controller: cursor moved");
+
+    // ── Software interrupts (synchronous — caused by executing an instruction) ──
+    std::cout << "\n=== Software Interrupts (synchronous) ===";
+    fire_interrupt(0,   cpu, "DIV instruction with divisor=0 (exception)");
+    fire_interrupt(14,  cpu, "MOV [0xDEADBEEF] — address not in page table (fault)");
+    fire_interrupt(128, cpu, "INT 0x80 instruction — application making syscall (trap)");
+
+    // ── Unhandled interrupt ────────────────────────────────────────────────────
+    std::cout << "\n=== Unhandled Interrupt ===";
+    fire_interrupt(200, cpu, "unknown device");
+
+    std::cout << "\n=== Simulation complete ===\n";
+    return 0;
+}
+```
+
+### C++ — Medium / LeetCode Style
+Priority-based interrupt controller with interrupt masking — higher-priority interrupts preempt lower ones; masked interrupt lines are silently dropped (models real PIC/APIC behavior).
+
+```cpp
+// Priority interrupt controller: models a real PIC (Programmable Interrupt Controller) / APIC.
+// Features: priority ordering (NMI > page fault > timer > keyboard > syscall),
+//           interrupt masking (disable specific lines during critical sections),
+//           EOI (End Of Interrupt) acknowledgment.
+
+#include <iostream>
+#include <functional>
+#include <map>
+#include <set>
+#include <vector>
+#include <queue>
+#include <string>
+
+// ── Interrupt descriptor ──────────────────────────────────────────────────────
+struct IRQ {
+    int                       vector;
+    int                       priority;   // higher number = more urgent
+    std::string               name;
+    std::function<void()>     handler;
+
+    bool operator<(const IRQ& o) const {
+        // max-heap: highest priority dispatched first
+        if (priority != o.priority) return priority < o.priority;
+        return vector > o.vector;     // tie-break by lower vector number
+    }
+};
+
+// ── Priority Interrupt Controller ─────────────────────────────────────────────
+class PIC {
+    std::map<int, IRQ>            registered;   // vector → IRQ descriptor
+    std::set<int>                 masked;        // masked vectors (IMR register)
+    std::priority_queue<IRQ>      pending;       // waiting to be dispatched
+    int                           current_prio = -1;  // priority of running ISR
+
+public:
+    void register_irq(int vec, int prio, const std::string& name, std::function<void()> h) {
+        registered[vec] = {vec, prio, name, h};
+        std::cout << "  PIC: [" << std::setw(3) << vec << "] prio=" << prio
+                  << " " << name << " registered\n";
+    }
+
+    // Mask Register (IMR): masked interrupt lines won't fire until unmasked
+    void mask(int vec)   {
+        masked.insert(vec);
+        std::cout << "  PIC: MASKED   line=" << vec << " (" << registered[vec].name << ")\n";
+    }
+    void unmask(int vec) {
+        masked.erase(vec);
+        std::cout << "  PIC: UNMASKED line=" << vec << " (" << registered[vec].name << ")\n";
+    }
+
+    // External signal from device or CPU instruction
+    void signal(int vec) {
+        if (masked.count(vec)) {
+            std::cout << "  PIC: vector=" << vec << " MASKED → dropped\n";
+            return;
+        }
+        if (!registered.count(vec)) {
+            std::cout << "  PIC: vector=" << vec << " not registered → spurious interrupt\n";
+            return;
+        }
+        const IRQ& irq = registered.at(vec);
+        pending.push(irq);
+        std::cout << "  PIC: queued vector=" << vec << " (" << irq.name
+                  << ") prio=" << irq.priority << "\n";
+    }
+
+    // Dispatch all pending interrupts (highest priority first)
+    void dispatch_all() {
+        std::cout << "\n--- Dispatching (highest priority first) ---\n";
+        while (!pending.empty()) {
+            IRQ irq = pending.top(); pending.pop();
+            std::cout << "\n  [CPU] Dispatching " << irq.name
+                      << " (vector=" << irq.vector << " prio=" << irq.priority << ")\n";
+            std::cout << "  [CPU] USER → KERNEL\n";
+            int saved_prio = current_prio;
+            current_prio = irq.priority;
+            irq.handler();
+            current_prio = saved_prio;
+            std::cout << "  [PIC] EOI for vector=" << irq.vector << " → line re-armed\n";
+            std::cout << "  [CPU] KERNEL → USER\n";
+        }
+    }
+};
+
+#include <iomanip>
+int main() {
+    std::cout << "=== Priority Interrupt Controller ===\n\n";
+    PIC pic;
+
+    // Register interrupt handlers (priority: NMI > page fault > timer > disk > keyboard > syscall)
+    pic.register_irq(2,   100, "NMI (Non-Maskable)",          []{ std::cout << "    [ISR] NMI: hardware failure — alert operator!\n"; });
+    pic.register_irq(14,  80,  "Page Fault (#PF)",            []{ std::cout << "    [ISR] Page fault: loading missing page from disk\n"; });
+    pic.register_irq(32,  50,  "Timer IRQ0 (10ms)",           []{ std::cout << "    [ISR] Timer: scheduler tick, check time slices\n"; });
+    pic.register_irq(46,  40,  "Disk IRQ14 (DMA complete)",   []{ std::cout << "    [ISR] Disk: DMA done, wake blocked process\n"; });
+    pic.register_irq(33,  30,  "Keyboard IRQ1",               []{ std::cout << "    [ISR] Keyboard: key 'A' → input buffer\n"; });
+    pic.register_irq(128, 20,  "Syscall (INT 0x80)",          []{ std::cout << "    [ISR] Syscall: sys_read handled\n"; });
+    std::cout << "\n";
+
+    // Multiple interrupts arrive "simultaneously"
+    std::cout << "--- Signaling interrupts ---\n";
+    pic.signal(33);    // keyboard (prio 30)
+    pic.signal(128);   // syscall  (prio 20)
+    pic.signal(32);    // timer    (prio 50)
+    pic.signal(14);    // page fault (prio 80)
+    pic.signal(2);     // NMI     (prio 100) — will be dispatched first
+
+    // Mask keyboard during critical section (e.g., updating kernel data structures)
+    std::cout << "\n--- Masking keyboard during critical section ---\n";
+    pic.mask(33);
+    pic.signal(33);    // will be dropped
+
+    // Dispatch — NMI runs first, then page fault, timer, disk, syscall
+    pic.dispatch_all();
+
+    std::cout << "\n--- Critical section done: unmask keyboard ---\n";
+    pic.unmask(33);
+    return 0;
+}
+```
+
+### Python — Simple Version
+Simulate the interrupt vector table (IVT) — register ISRs, then fire hardware and software interrupts and watch the full mode-switch cycle for each.
+
+```python
+# Simulate an interrupt controller with an interrupt vector table (IVT).
+# Hardware interrupts: fired by devices (timer, keyboard) — asynchronous.
+# Software interrupts: fired by CPU instructions (INT 0x80, DIV/0) — synchronous.
+
+# ── CPU state ─────────────────────────────────────────────────────────────────
+class CPUState:
+    def __init__(self):
+        self.pc   = 5000    # program counter
+        self.mode = "USER"  # USER or KERNEL
+
+# ── Interrupt Vector Table ────────────────────────────────────────────────────
+# In x86 this is the IDT (Interrupt Descriptor Table).
+# Maps vector number → (name, handler function).
+ivt: dict[int, tuple[str, callable]] = {}
+
+def register_handler(vector: int, name: str, handler: callable):
+    ivt[vector] = (name, handler)
+    print(f"  IVT[{vector:3d}] = {name}")
+
+# ── ISR definitions ───────────────────────────────────────────────────────────
+# Each ISR must be very short — other interrupts on the same line are disabled while it runs.
+def isr_divide_by_zero(): print("    [ISR] Divide-by-Zero: SIGFPE sent → process crashes")
+def isr_page_fault():     print("    [ISR] Page Fault: OS loads missing page from disk → process resumes")
+def isr_timer():          print("    [ISR] Timer IRQ: tick! decrement time slice → call scheduler")
+def isr_keyboard():       print("    [ISR] Keyboard IRQ: scancode 0x1E ('A') pushed to input buffer")
+def isr_disk():           print("    [ISR] Disk IRQ: DMA transfer complete → wake blocked process")
+def isr_syscall():        print("    [ISR] Syscall: sys_write(1,'hello',5) → kernel writes to stdout")
+
+# ── Fire an interrupt ──────────────────────────────────────────────────────────
+def fire_interrupt(vector: int, cpu: CPUState, source: str):
+    """
+    Simulate the full CPU interrupt handling sequence:
+    1. CPU finishes current instruction
+    2. Saves state (PC, EFLAGS) on kernel stack
+    3. Loads IDT entry → jumps to ISR in kernel mode
+    4. ISR runs, sends EOI to PIC
+    5. IRET restores state, back to user mode
+    """
+    print(f"\n{'─'*55}")
+    print(f"INTERRUPT vector={vector}  source: {source}")
+
+    if vector not in ivt:
+        print(f"  [CPU] No handler for vector {vector} → triple fault → system reset!")
+        return
+
+    name, handler = ivt[vector]
+
+    # Save state (CPU does this automatically on x86)
+    saved_pc   = cpu.pc
+    print(f"  [CPU] Saving state: PC={cpu.pc} mode={cpu.mode}")
+
+    # Switch to kernel mode
+    cpu.mode = "KERNEL"
+    print(f"  [CPU] Mode switch: USER → KERNEL")
+    print(f"  [CPU] Jumping to ISR: {name}")
+
+    # Run ISR
+    handler()
+
+    # Restore state (IRET)
+    cpu.pc   = saved_pc
+    cpu.mode = "USER"
+    print(f"  [CPU] IRET: PC={cpu.pc} mode={cpu.mode} (resumed)")
+
+if __name__ == "__main__":
+    print("=== Interrupt Controller Simulation ===\n")
+    print("Registering ISRs:")
+    register_handler(0,   "Divide-by-Zero (#DE)", isr_divide_by_zero)
+    register_handler(14,  "Page Fault (#PF)",      isr_page_fault)
+    register_handler(32,  "Timer IRQ0",            isr_timer)
+    register_handler(33,  "Keyboard IRQ1",         isr_keyboard)
+    register_handler(46,  "Disk IRQ14",            isr_disk)
+    register_handler(128, "Syscall INT 0x80",      isr_syscall)
+
+    cpu = CPUState()
+
+    print("\n=== Hardware Interrupts (asynchronous — from devices) ===")
+    fire_interrupt(32,  cpu, "PIT timer chip (every 10ms — preemption clock)")
+    fire_interrupt(33,  cpu, "keyboard controller: user pressed 'A'")
+    fire_interrupt(46,  cpu, "disk controller: DMA transfer finished")
+
+    print("\n=== Software Interrupts (synchronous — from instructions) ===")
+    fire_interrupt(0,   cpu, "DIV instruction with divisor=0 (exception)")
+    fire_interrupt(14,  cpu, "MOV [0xDEAD] — page not present in RAM (fault)")
+    fire_interrupt(128, cpu, "INT 0x80 instruction — application syscall (trap)")
+
+    print("\n=== Unhandled Interrupt ===")
+    fire_interrupt(200, cpu, "unknown device")
+
+    print("\n=== Simulation complete ===")
+```
+
+### Python — Medium Level
+Priority-based interrupt controller with interrupt masking — higher-priority interrupts preempt lower ones; masked lines are silently dropped; EOI signals end of each ISR.
+
+```python
+# Priority interrupt controller: models PIC (Programmable Interrupt Controller) / APIC.
+# Uses a max-heap (priority queue) so the most urgent interrupt always runs first.
+# Masking: disables an interrupt line temporarily (used during critical sections).
+
+import heapq
+from dataclasses import dataclass, field
+from typing import Callable
+
+@dataclass
+class IRQ:
+    priority: int              # higher = more urgent (NMI=100, syscall=20)
+    vector:   int              # interrupt number
+    name:     str
+    handler:  Callable = field(compare=False, repr=False)
+
+    def __lt__(self, other):
+        # Python heapq is a min-heap; negate priority for max-heap behavior
+        return (-self.priority, self.vector) < (-other.priority, other.vector)
+
+class PIC:
+    def __init__(self):
+        self.registered: dict[int, IRQ] = {}
+        self.masked:      set[int]       = set()
+        self.pending:     list[IRQ]      = []   # heapq
+
+    def register(self, vector: int, priority: int, name: str, handler: Callable):
+        self.registered[vector] = IRQ(priority, vector, name, handler)
+        print(f"  PIC: [{vector:3d}] prio={priority:3d}  {name}")
+
+    def mask(self, vector: int):
+        self.masked.add(vector)
+        print(f"  PIC: MASKED   line={vector} ({self.registered.get(vector, IRQ(0,0,'?',None)).name})")
+
+    def unmask(self, vector: int):
+        self.masked.discard(vector)
+        print(f"  PIC: UNMASKED line={vector}")
+
+    def signal(self, vector: int):
+        """Raise an interrupt line (device or CPU instruction triggers this)."""
+        if vector in self.masked:
+            print(f"  PIC: vector={vector} MASKED → dropped")
+            return
+        if vector not in self.registered:
+            print(f"  PIC: vector={vector} unknown → spurious interrupt")
+            return
+        irq = self.registered[vector]
+        heapq.heappush(self.pending, irq)
+        print(f"  PIC: queued  vector={vector} ({irq.name}) prio={irq.priority}")
+
+    def dispatch_all(self):
+        """Dispatch all pending interrupts, highest priority first."""
+        print("\n--- Dispatching (highest priority first) ---")
+        while self.pending:
+            irq = heapq.heappop(self.pending)
+            print(f"\n  [CPU] {irq.name} (vector={irq.vector} prio={irq.priority})")
+            print( "  [CPU] USER → KERNEL")
+            irq.handler()
+            print(f"  [PIC] EOI for vector={irq.vector} → line re-armed")
+            print( "  [CPU] KERNEL → USER (IRET)")
+
+if __name__ == "__main__":
+    print("=== Priority Interrupt Controller ===\n")
+    pic = PIC()
+
+    # Register: priority order: NMI(100) > Page Fault(80) > Timer(50) > Disk(40) > Keyboard(30) > Syscall(20)
+    pic.register(2,   100, "NMI (Non-Maskable)",        lambda: print("    [ISR] NMI: hardware failure — alert operator!"))
+    pic.register(14,  80,  "Page Fault (#PF)",          lambda: print("    [ISR] Page fault: loading page from disk"))
+    pic.register(32,  50,  "Timer IRQ0 (10ms)",         lambda: print("    [ISR] Timer: scheduler tick"))
+    pic.register(46,  40,  "Disk IRQ14",                lambda: print("    [ISR] Disk: DMA done, unblock waiting process"))
+    pic.register(33,  30,  "Keyboard IRQ1",             lambda: print("    [ISR] Keyboard: key pressed → input buffer"))
+    pic.register(128, 20,  "Syscall (INT 0x80)",        lambda: print("    [ISR] Syscall: sys_read executed"))
+    print()
+
+    # Signal several interrupts simultaneously
+    print("--- Signaling interrupts ---")
+    pic.signal(33)    # keyboard  (prio 30)
+    pic.signal(128)   # syscall   (prio 20)
+    pic.signal(32)    # timer     (prio 50)
+    pic.signal(14)    # page fault(prio 80)
+    pic.signal(2)     # NMI       (prio 100) — runs first
+
+    # Mask keyboard during critical section
+    print("\n--- Masking keyboard (critical section) ---")
+    pic.mask(33)
+    pic.signal(33)    # dropped
+
+    # Dispatch all — NMI goes first, then page fault, timer, disk, syscall
+    pic.dispatch_all()
+
+    print("\n--- Critical section done ---")
+    pic.unmask(33)
+    print("  Keyboard interrupts re-enabled")
+```
+
+---
+
 ## 10. Key Takeaways
 
 - **Interrupt** = signal to CPU to pause current work, handle urgent event, then resume — CPU finishes current instruction first, then saves state, runs ISR, restores state, continues

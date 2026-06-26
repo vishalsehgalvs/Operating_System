@@ -295,6 +295,220 @@ For the bounded buffer, semaphores are the classic OS-level solution because the
 
 ---
 
+## 10. Code Examples
+
+> Working code that demonstrates the classic bounded-buffer producer-consumer problem.
+
+### C++ — Simple Version
+Circular array buffer with `std::mutex` + two `std::counting_semaphore`s — the textbook semaphore solution.
+
+```cpp
+#include <iostream>
+#include <thread>
+#include <mutex>
+#include <semaphore>  // C++20
+#include <chrono>
+
+const int BUFFER_SIZE = 5;
+
+int  buffer[BUFFER_SIZE];
+int  in  = 0;   // next index for producer to write
+int  out = 0;   // next index for consumer to read
+
+// Three synchronization variables — the classic solution
+std::counting_semaphore<BUFFER_SIZE> empty_slots(BUFFER_SIZE); // starts full (all slots empty)
+std::counting_semaphore<BUFFER_SIZE> full_slots(0);             // starts at 0 (no items yet)
+std::mutex buffer_mutex;  // mutual exclusion on buffer indices
+
+void producer(int id, int items) {
+    for (int i = 0; i < items; i++) {
+        int item = id * 100 + i;  // produced value
+
+        // ORDERING MATTERS: wait(empty) BEFORE wait(mutex) — reversing causes deadlock!
+        empty_slots.acquire();   // wait: need a free slot (blocks if buffer is full)
+        {
+            std::lock_guard<std::mutex> lock(buffer_mutex);
+            buffer[in] = item;
+            in = (in + 1) % BUFFER_SIZE;   // circular increment
+            std::cout << "P" << id << " produced " << item << "\n";
+        }
+        full_slots.release();    // signal: one more item available for consumers
+    }
+}
+
+void consumer(int id, int items) {
+    for (int i = 0; i < items; i++) {
+        full_slots.acquire();    // wait: need an item (blocks if buffer is empty)
+        int item;
+        {
+            std::lock_guard<std::mutex> lock(buffer_mutex);
+            item = buffer[out];
+            out = (out + 1) % BUFFER_SIZE;
+        }
+        empty_slots.release();   // signal: freed a slot, producers may now write
+        std::cout << "C" << id << " consumed " << item << "\n";
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+}
+
+int main() {
+    std::thread p1(producer, 1, 6), p2(producer, 2, 4);
+    std::thread c1(consumer, 1, 5), c2(consumer, 2, 5);
+    p1.join(); p2.join(); c1.join(); c2.join();
+    return 0;
+}
+```
+
+### C++ — Medium / LeetCode Style
+`std::condition_variable` + `std::queue` — more expressive; shows the wait predicate pattern clearly.
+
+```cpp
+#include <iostream>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <queue>
+#include <chrono>
+
+const int CAPACITY = 5;
+
+std::queue<int>         buffer;
+std::mutex              mtx;
+std::condition_variable not_full;    // producers wait on this
+std::condition_variable not_empty;   // consumers wait on this
+
+void producer(int id, int count) {
+    for (int i = 0; i < count; i++) {
+        std::unique_lock<std::mutex> lock(mtx);
+
+        // Wait while buffer is full — lambda is the "wake-up condition"
+        not_full.wait(lock, [] { return (int)buffer.size() < CAPACITY; });
+
+        int item = id * 100 + i;
+        buffer.push(item);
+        std::cout << "P" << id << " produced " << item
+                  << " (size=" << buffer.size() << ")\n";
+
+        not_empty.notify_one();  // wake one sleeping consumer
+    }
+}
+
+void consumer(int id, int count) {
+    for (int i = 0; i < count; i++) {
+        std::unique_lock<std::mutex> lock(mtx);
+
+        // Wait while buffer is empty
+        not_empty.wait(lock, [] { return !buffer.empty(); });
+
+        int item = buffer.front(); buffer.pop();
+        std::cout << "C" << id << " consumed " << item
+                  << " (size=" << buffer.size() << ")\n";
+
+        not_full.notify_one();   // wake one sleeping producer
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+}
+
+int main() {
+    std::thread p1(producer, 1, 6), p2(producer, 2, 4);
+    std::thread c1(consumer, 1, 5), c2(consumer, 2, 5);
+    p1.join(); p2.join(); c1.join(); c2.join();
+    return 0;
+}
+```
+
+### Python — Simple Version
+`threading.Semaphore` (empty/full) + `threading.Lock` (mutex) — mirrors the C++ semaphore solution exactly.
+
+```python
+import threading
+import time
+import random
+
+BUFFER_SIZE = 5
+buffer = []
+
+mutex = threading.Lock()
+empty = threading.Semaphore(BUFFER_SIZE)  # counts empty slots — starts full
+full  = threading.Semaphore(0)            # counts filled slots — starts at 0
+
+def producer(pid, items):
+    for i in range(items):
+        item = pid * 100 + i
+        time.sleep(random.uniform(0.01, 0.05))  # simulate production time
+
+        # ORDERING: wait(empty) before wait(mutex) — always!
+        empty.acquire()          # wait for a free slot
+        with mutex:              # protect buffer access
+            buffer.append(item)
+            print(f"  P{pid} produced {item} | buffer={buffer}")
+        full.release()           # signal: one more item ready
+
+def consumer(cid, items):
+    for i in range(items):
+        time.sleep(random.uniform(0.02, 0.07))  # simulate consumption time
+
+        # ORDERING: wait(full) before wait(mutex) — always!
+        full.acquire()           # wait for an available item
+        with mutex:
+            item = buffer.pop(0)
+            print(f"  C{cid} consumed {item} | buffer={buffer}")
+        empty.release()          # signal: freed one slot
+
+threads = [
+    threading.Thread(target=producer, args=(1, 5)),
+    threading.Thread(target=producer, args=(2, 5)),
+    threading.Thread(target=consumer, args=(1, 5)),
+    threading.Thread(target=consumer, args=(2, 5)),
+]
+for t in threads: t.start()
+for t in threads: t.join()
+print("All items produced and consumed!")
+```
+
+### Python — Medium Level
+`queue.Queue` — Python's stdlib bounded buffer that encapsulates all three sync variables internally.
+
+```python
+import queue
+import threading
+import time
+
+# queue.Queue is a thread-safe bounded buffer.
+# put() = wait(empty) + wait(mutex) + add + signal(full), all in one call.
+# get() = wait(full)  + wait(mutex) + remove + signal(empty), all in one call.
+BUFFER_SIZE = 5
+buffer = queue.Queue(maxsize=BUFFER_SIZE)
+
+def producer(pid, count):
+    for i in range(count):
+        item = pid * 100 + i
+        buffer.put(item)      # blocks automatically if buffer is full
+        print(f"P{pid} produced {item} | qsize={buffer.qsize()}")
+        time.sleep(0.01)
+
+def consumer(cid, count):
+    for i in range(count):
+        item = buffer.get()   # blocks automatically if buffer is empty
+        print(f"C{cid} consumed {item} | qsize={buffer.qsize()}")
+        buffer.task_done()    # signal that this item has been fully processed
+        time.sleep(0.02)
+
+threads = [
+    threading.Thread(target=producer, args=(1, 6)),
+    threading.Thread(target=producer, args=(2, 4)),
+    threading.Thread(target=consumer, args=(1, 5)),
+    threading.Thread(target=consumer, args=(2, 5)),
+]
+for t in threads: t.start()
+for t in threads: t.join()
+buffer.join()   # block until all items have task_done() called
+print("Done!")
+```
+
+---
+
 ## 11. Key Takeaways
 
 - The **producer-consumer problem** models any scenario where data flows through a bounded buffer between processes operating at different speeds

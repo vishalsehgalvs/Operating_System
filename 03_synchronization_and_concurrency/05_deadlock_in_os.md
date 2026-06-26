@@ -410,6 +410,251 @@ signal(fork[first]);
 
 ---
 
+## 8. Code Examples
+
+> Working code that demonstrates deadlock formation and detection via cycle detection in a wait-for graph.
+
+### C++ — Simple Version
+Shows the dangerous lock-acquisition order that causes deadlock, then the safe fix using `std::scoped_lock`.
+
+```cpp
+#include <iostream>
+#include <thread>
+#include <mutex>
+#include <chrono>
+
+std::mutex resource1;   // R1
+std::mutex resource2;   // R2
+
+// Safe version: std::scoped_lock acquires multiple mutexes in a deadlock-free order
+void thread1_safe() {
+    // scoped_lock uses a deadlock-avoidance algorithm internally (same as std::lock)
+    std::scoped_lock lock(resource1, resource2);
+    std::cout << "Thread 1 (safe): holding R1 and R2\n";
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+}
+
+void thread2_safe() {
+    std::scoped_lock lock(resource1, resource2);  // same pair — deadlock-free
+    std::cout << "Thread 2 (safe): holding R1 and R2\n";
+}
+
+// Dangerous version: each thread locks in OPPOSITE order
+// Thread 1 holds R1, waits for R2
+// Thread 2 holds R2, waits for R1 → circular wait → DEADLOCK
+// WARNING: uncommenting this will hang the program permanently.
+//
+// void thread1_deadlock() {
+//     std::lock_guard<std::mutex> l1(resource1);
+//     std::this_thread::sleep_for(std::chrono::milliseconds(50));
+//     std::lock_guard<std::mutex> l2(resource2);  // ← blocks forever
+// }
+// void thread2_deadlock() {
+//     std::lock_guard<std::mutex> l2(resource2);
+//     std::this_thread::sleep_for(std::chrono::milliseconds(50));
+//     std::lock_guard<std::mutex> l1(resource1);  // ← blocks forever
+// }
+
+int main() {
+    std::cout << "--- Safe lock order (scoped_lock) ---\n";
+    std::thread t1(thread1_safe), t2(thread2_safe);
+    t1.join(); t2.join();
+    std::cout << "No deadlock!\n";
+    return 0;
+}
+```
+
+### C++ — Medium / LeetCode Style
+Deadlock detection via DFS cycle detection in a wait-for graph.
+
+```cpp
+#include <iostream>
+#include <vector>
+#include <string>
+
+// Detect deadlock: find a cycle in the wait-for graph using DFS.
+// wait_for[i] = list of processes that process i is waiting for.
+struct DeadlockDetector {
+    int n;
+    std::vector<std::vector<int>> wait_for;
+
+    DeadlockDetector(int n) : n(n), wait_for(n) {}
+
+    void add_wait(int from, int to) { wait_for[from].push_back(to); }
+
+    bool dfs(int node, std::vector<bool>& visited, std::vector<bool>& in_stack) {
+        visited[node] = true;
+        in_stack[node] = true;
+
+        for (int neighbor : wait_for[node]) {
+            if (!visited[neighbor] && dfs(neighbor, visited, in_stack))
+                return true;
+            if (in_stack[neighbor]) {
+                std::cout << "  Cycle found: process " << neighbor
+                          << " is in the current DFS path\n";
+                return true;
+            }
+        }
+
+        in_stack[node] = false;
+        return false;
+    }
+
+    bool detect() {
+        std::vector<bool> visited(n, false), in_stack(n, false);
+        for (int i = 0; i < n; i++)
+            if (!visited[i] && dfs(i, visited, in_stack))
+                return true;
+        return false;
+    }
+};
+
+int main() {
+    // Scenario 1: P0→P1→P2→P0 (cycle → DEADLOCK)
+    std::cout << "Scenario 1 (P0→P1→P2→P0):\n";
+    DeadlockDetector d1(3);
+    d1.add_wait(0, 1); d1.add_wait(1, 2); d1.add_wait(2, 0);
+    std::cout << "  Result: " << (d1.detect() ? "DEADLOCK" : "No deadlock") << "\n\n";
+
+    // Scenario 2: P0→P1→P2, no cycle (P2 waits for nobody)
+    std::cout << "Scenario 2 (P0→P1→P2, no cycle):\n";
+    DeadlockDetector d2(3);
+    d2.add_wait(0, 1); d2.add_wait(1, 2);
+    std::cout << "  Result: " << (d2.detect() ? "DEADLOCK" : "No deadlock") << "\n\n";
+
+    // Scenario 3: Partial deadlock — P2↔P3 deadlock, P0→P1 fine
+    std::cout << "Scenario 3 (P2↔P3 deadlocked, P0→P1 not):\n";
+    DeadlockDetector d3(4);
+    d3.add_wait(0, 1); d3.add_wait(2, 3); d3.add_wait(3, 2);
+    std::cout << "  Result: " << (d3.detect() ? "DEADLOCK" : "No deadlock") << "\n";
+
+    return 0;
+}
+```
+
+### Python — Simple Version
+Shows the dangerous lock order with `timeout` to avoid actually hanging, then demonstrates the safe fix.
+
+```python
+import threading
+import time
+
+resource1 = threading.Lock()  # R1
+resource2 = threading.Lock()  # R2
+
+def thread1_dangerous():
+    """Acquires R1 first, then R2 — dangerous if thread2 does the reverse."""
+    with resource1:
+        print("Thread 1: holding R1, trying R2...")
+        time.sleep(0.05)   # let Thread 2 grab R2 first
+        acquired = resource2.acquire(timeout=0.3)   # timeout prevents actual hang
+        if acquired:
+            print("Thread 1: got R2 too (lucky timing — no deadlock this run)")
+            resource2.release()
+        else:
+            print("Thread 1: TIMED OUT waiting for R2 — DEADLOCK would occur here!")
+
+def thread2_dangerous():
+    """Acquires R2 first, then R1 — opposite order from thread1."""
+    with resource2:
+        print("Thread 2: holding R2, trying R1...")
+        time.sleep(0.05)
+        acquired = resource1.acquire(timeout=0.3)
+        if acquired:
+            print("Thread 2: got R1 too (lucky timing — no deadlock this run)")
+            resource1.release()
+        else:
+            print("Thread 2: TIMED OUT waiting for R1 — DEADLOCK would occur here!")
+
+def thread1_safe():
+    """Fix: consistent lock order — always R1 before R2."""
+    with resource1:
+        with resource2:
+            print("Thread 1 (safe): holding R1 then R2 — no deadlock possible")
+
+def thread2_safe():
+    """Same order as thread1_safe — R1 before R2."""
+    with resource1:
+        with resource2:
+            print("Thread 2 (safe): holding R1 then R2 — no deadlock possible")
+
+print("=== Dangerous order (opposite lock sequence) ===")
+t1 = threading.Thread(target=thread1_dangerous)
+t2 = threading.Thread(target=thread2_dangerous)
+t1.start(); t2.start(); t1.join(); t2.join()
+
+print("\n=== Safe order (same lock sequence for both threads) ===")
+t3 = threading.Thread(target=thread1_safe)
+t4 = threading.Thread(target=thread2_safe)
+t3.start(); t4.start(); t3.join(); t4.join()
+```
+
+### Python — Medium Level
+Deadlock detection: DFS cycle detection on a wait-for graph — classic graph algorithm applied to OS scheduling.
+
+```python
+from collections import defaultdict
+
+def detect_deadlock(n_procs, wait_edges):
+    """
+    Detect deadlock via DFS cycle detection in a wait-for graph.
+
+    wait_edges: list of (from_pid, to_pid) — 'from waits for to to release a resource'
+    Returns: (deadlocked: bool, cycle: list of pids in the cycle)
+    """
+    graph = defaultdict(list)
+    for u, v in wait_edges:
+        graph[u].append(v)
+
+    visited   = set()
+    rec_stack = set()   # nodes in the current DFS path
+    cycle_out = []
+
+    def dfs(node, path):
+        visited.add(node)
+        rec_stack.add(node)
+        path.append(node)
+
+        for nbr in graph[node]:
+            if nbr not in visited:
+                if dfs(nbr, path):
+                    return True
+            elif nbr in rec_stack:
+                # Found a back edge → cycle exists
+                start = path.index(nbr)
+                cycle_out.extend(path[start:] + [nbr])
+                return True
+
+        rec_stack.discard(node)
+        path.pop()
+        return False
+
+    for p in range(n_procs):
+        if p not in visited:
+            if dfs(p, []):
+                return True, cycle_out
+    return False, []
+
+
+# Test 1: P0→P1→P2→P0 (classic deadlock cycle)
+dl, cycle = detect_deadlock(3, [(0,1),(1,2),(2,0)])
+print(f"Test 1 — deadlock={dl}, cycle={' -> '.join(map(str, cycle))}")
+
+# Test 2: P0→P1→P2, no cycle
+dl2, _ = detect_deadlock(3, [(0,1),(1,2)])
+print(f"Test 2 — deadlock={dl2}")
+
+# Test 3: P0 and P1 independent, P2↔P3 deadlocked
+dl3, cycle3 = detect_deadlock(4, [(0,1),(2,3),(3,2)])
+print(f"Test 3 — deadlock={dl3}, cycle={' -> '.join(map(str, cycle3))}")
+
+# Test 4: 5 processes, longer chain P0→P1→P2→P3→P4→P1
+dl4, cycle4 = detect_deadlock(5, [(0,1),(1,2),(2,3),(3,4),(4,1)])
+print(f"Test 4 — deadlock={dl4}, cycle={' -> '.join(map(str, cycle4))}")
+```
+
+---
+
 ## 9. Key Takeaways
 
 - **Deadlock** = a set of processes permanently blocked, each waiting for a resource held by another in the set

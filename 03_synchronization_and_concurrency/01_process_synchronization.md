@@ -218,6 +218,164 @@ The kernel's memory allocation data structures must be protected from concurrent
 
 ---
 
+## 8. Code Examples
+
+> Working code that demonstrates process synchronization and race conditions in practice.
+
+### C++ — Simple Version
+Two threads increment a shared counter without sync (shows wrong result), highlighting the race condition.
+
+```cpp
+#include <iostream>
+#include <thread>
+#include <mutex>
+#include <atomic>
+
+int counter_unsafe = 0;   // no protection — race condition happens here
+
+// ============================================================
+// VERSION 1: NO SYNC — race condition (result will be wrong)
+// ============================================================
+void increment_unsafe(int iterations) {
+    for (int i = 0; i < iterations; i++) {
+        // counter++ is NOT atomic: it compiles to 3 steps:
+        //   1. LOAD  counter into register
+        //   2. ADD   1 to register
+        //   3. STORE register back to counter
+        // A context switch between any two steps corrupts the value.
+        counter_unsafe++;
+    }
+}
+
+int main() {
+    const int ITERATIONS = 100000;
+
+    // --- Without sync (race condition) ---
+    counter_unsafe = 0;
+    std::thread t1(increment_unsafe, ITERATIONS);
+    std::thread t2(increment_unsafe, ITERATIONS);
+    t1.join();
+    t2.join();
+    // Expected: 200000, Actual: unpredictably less (race condition!)
+    std::cout << "Without sync — Expected: 200000, Got: " << counter_unsafe << "\n";
+
+    return 0;
+}
+```
+
+### C++ — Medium / LeetCode Style
+Correct versions using `std::mutex` and `std::atomic` — both fix the race condition.
+
+```cpp
+#include <iostream>
+#include <thread>
+#include <mutex>
+#include <atomic>
+
+std::mutex mtx;
+int counter_mutex = 0;
+std::atomic<int> counter_atomic{0};  // hardware-level atomicity — no mutex needed
+
+void increment_with_mutex(int iterations) {
+    for (int i = 0; i < iterations; i++) {
+        std::lock_guard<std::mutex> lock(mtx);  // acquires mutex; auto-releases on scope exit
+        counter_mutex++;
+    }
+}
+
+void increment_with_atomic(int iterations) {
+    for (int i = 0; i < iterations; i++) {
+        counter_atomic++;  // single indivisible CPU instruction — safe by design
+    }
+}
+
+int main() {
+    const int ITERATIONS = 100000;
+
+    // --- With mutex ---
+    counter_mutex = 0;
+    std::thread t1(increment_with_mutex, ITERATIONS);
+    std::thread t2(increment_with_mutex, ITERATIONS);
+    t1.join(); t2.join();
+    std::cout << "With mutex  — Expected: 200000, Got: " << counter_mutex << "\n";
+
+    // --- With atomic ---
+    counter_atomic = 0;
+    std::thread t3(increment_with_atomic, ITERATIONS);
+    std::thread t4(increment_with_atomic, ITERATIONS);
+    t3.join(); t4.join();
+    std::cout << "With atomic — Expected: 200000, Got: " << counter_atomic.load() << "\n";
+
+    return 0;
+}
+```
+
+### Python — Simple Version
+Manually simulates interleaving with `time.sleep(0)` to expose the race condition clearly.
+
+```python
+import threading
+import time
+
+counter = 0
+
+def increment_without_lock(iterations):
+    global counter
+    for _ in range(iterations):
+        temp = counter      # Step 1: read current value
+        time.sleep(0)       # yield — lets another thread sneak in between read and write!
+        counter = temp + 1  # Step 2: write back — may overwrite another thread's update
+
+ITERATIONS = 500
+counter = 0
+
+t1 = threading.Thread(target=increment_without_lock, args=(ITERATIONS,))
+t2 = threading.Thread(target=increment_without_lock, args=(ITERATIONS,))
+t1.start(); t2.start()
+t1.join(); t2.join()
+# Expected: 1000. Actual: much less — threads overwrite each other's updates.
+print(f"Without lock — Expected: {2 * ITERATIONS}, Got: {counter}")
+```
+
+### Python — Medium Level
+Side-by-side comparison of the broken and fixed versions using `threading.Lock`.
+
+```python
+import threading
+
+counter = 0
+lock = threading.Lock()
+
+def increment_unsafe(iterations):
+    global counter
+    for _ in range(iterations):
+        counter += 1  # not thread-safe under free-threading or non-GIL builds
+
+def increment_safe(iterations):
+    global counter
+    for _ in range(iterations):
+        with lock:      # acquire on entry, release on exit — mutual exclusion guaranteed
+            counter += 1
+
+ITERATIONS = 100000
+
+# Unsafe version
+counter = 0
+t1 = threading.Thread(target=increment_unsafe, args=(ITERATIONS,))
+t2 = threading.Thread(target=increment_unsafe, args=(ITERATIONS,))
+t1.start(); t2.start(); t1.join(); t2.join()
+print(f"Without lock — Expected: {2*ITERATIONS}, Got: {counter}")
+
+# Safe version
+counter = 0
+t1 = threading.Thread(target=increment_safe, args=(ITERATIONS,))
+t2 = threading.Thread(target=increment_safe, args=(ITERATIONS,))
+t1.start(); t2.start(); t1.join(); t2.join()
+print(f"With lock    — Expected: {2*ITERATIONS}, Got: {counter}")
+```
+
+---
+
 ## 9. Key Takeaways
 
 - **Process synchronization** = coordinating concurrent processes to safely share resources

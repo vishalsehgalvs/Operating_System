@@ -366,6 +366,345 @@ All resource types must be satisfiable — if even one type fails, the process c
 
 ---
 
+## 10. Code Examples
+
+> Working code that implements Banker's Algorithm — Safety Check and Resource Request.
+
+### C++ — Simple Version
+Safety Algorithm only — checks if the current state allows all processes to finish (classic textbook example).
+
+```cpp
+#include <iostream>
+#include <vector>
+
+const int N = 5;  // processes
+const int M = 3;  // resource types (A, B, C)
+
+// Classic 5-process, 3-resource example (Silberschatz textbook)
+int allocation[N][M] = {
+    {0, 1, 0},  // P0
+    {2, 0, 0},  // P1
+    {3, 0, 2},  // P2
+    {2, 1, 1},  // P3
+    {0, 0, 2},  // P4
+};
+int maximum[N][M] = {
+    {7, 5, 3},  // P0
+    {3, 2, 2},  // P1
+    {9, 0, 2},  // P2
+    {2, 2, 2},  // P3
+    {4, 3, 3},  // P4
+};
+int available[M] = {3, 3, 2};  // free resources: A=3, B=3, C=2
+int need[N][M];                 // need[i] = maximum[i] - allocation[i]
+
+void compute_need() {
+    for (int i = 0; i < N; i++)
+        for (int j = 0; j < M; j++)
+            need[i][j] = maximum[i][j] - allocation[i][j];
+}
+
+// Returns true if vector a ≤ b element-wise
+bool leq(int a[], int b[], int len) {
+    for (int j = 0; j < len; j++)
+        if (a[j] > b[j]) return false;
+    return true;
+}
+
+// Safety Algorithm: returns true if the current state is safe, fills safe_seq
+bool safety_check(std::vector<int>& safe_seq) {
+    int  work[M];
+    bool finish[N] = {};
+    for (int j = 0; j < M; j++) work[j] = available[j];   // Work = Available
+
+    while ((int)safe_seq.size() < N) {
+        bool found = false;
+        for (int i = 0; i < N; i++) {
+            // Find an unfinished process whose remaining need fits in Work
+            if (!finish[i] && leq(need[i], work, M)) {
+                // Simulate it finishing: it returns its allocation to Work
+                for (int j = 0; j < M; j++) work[j] += allocation[i][j];
+                finish[i] = true;
+                safe_seq.push_back(i);
+                found = true;
+            }
+        }
+        if (!found) break;  // stuck — no progress → unsafe
+    }
+    return (int)safe_seq.size() == N;
+}
+
+int main() {
+    compute_need();
+
+    std::cout << "Need Matrix:\n";
+    for (int i = 0; i < N; i++) {
+        std::cout << "  P" << i << ": ";
+        for (int j = 0; j < M; j++) std::cout << need[i][j] << " ";
+        std::cout << "\n";
+    }
+
+    std::vector<int> safe_seq;
+    if (safety_check(safe_seq)) {
+        std::cout << "\nSystem is SAFE. Safe sequence: ";
+        for (int p : safe_seq) std::cout << "P" << p << " ";
+        std::cout << "\n";
+    } else {
+        std::cout << "\nSystem is UNSAFE!\n";
+    }
+    return 0;
+}
+```
+
+### C++ — Medium / LeetCode Style
+Complete Banker's Algorithm with Safety Check + Resource Request — encapsulated in a class.
+
+```cpp
+#include <iostream>
+#include <vector>
+
+struct BankersAlgorithm {
+    int n, m;
+    std::vector<std::vector<int>> alloc, max_d, need;
+    std::vector<int> avail;
+
+    BankersAlgorithm(int n, int m,
+                     std::vector<std::vector<int>> alloc,
+                     std::vector<std::vector<int>> max_d,
+                     std::vector<int> avail)
+        : n(n), m(m), alloc(alloc), max_d(max_d), avail(avail), need(n, std::vector<int>(m)) {
+        for (int i = 0; i < n; i++)
+            for (int j = 0; j < m; j++)
+                need[i][j] = max_d[i][j] - alloc[i][j];
+    }
+
+    bool leq(const std::vector<int>& a, const std::vector<int>& b) const {
+        for (int j = 0; j < m; j++) if (a[j] > b[j]) return false;
+        return true;
+    }
+
+    // Safety Algorithm — returns safe sequence, or empty vector if unsafe
+    std::vector<int> safety_check() const {
+        std::vector<int> work = avail;
+        std::vector<bool> finish(n, false);
+        std::vector<int> seq;
+
+        while ((int)seq.size() < n) {
+            bool progress = false;
+            for (int i = 0; i < n; i++) {
+                if (!finish[i] && leq(need[i], work)) {
+                    for (int j = 0; j < m; j++) work[j] += alloc[i][j];
+                    finish[i] = true;
+                    seq.push_back(i);
+                    progress = true;
+                }
+            }
+            if (!progress) return {};
+        }
+        return seq;
+    }
+
+    // Resource Request Algorithm for process pid
+    bool request(int pid, std::vector<int> req) {
+        // Step 1: request must not exceed declared need
+        if (!leq(req, need[pid])) {
+            std::cout << "Error: request exceeds maximum claim for P" << pid << "\n";
+            return false;
+        }
+        // Step 2: resources must currently be available
+        if (!leq(req, avail)) {
+            std::cout << "P" << pid << " must wait — not enough resources available.\n";
+            return false;
+        }
+        // Step 3: tentatively allocate
+        for (int j = 0; j < m; j++) {
+            avail[j]     -= req[j];
+            alloc[pid][j] += req[j];
+            need[pid][j]  -= req[j];
+        }
+        // Step 4: run safety check on the new state
+        auto seq = safety_check();
+        if (!seq.empty()) {
+            std::cout << "Request GRANTED. New safe sequence: ";
+            for (int p : seq) std::cout << "P" << p << " ";
+            std::cout << "\n";
+            return true;
+        }
+        // Step 5: rollback — would have caused unsafe state
+        for (int j = 0; j < m; j++) {
+            avail[j]     += req[j];
+            alloc[pid][j] -= req[j];
+            need[pid][j]  += req[j];
+        }
+        std::cout << "Request DENIED — would lead to unsafe state.\n";
+        return false;
+    }
+};
+
+int main() {
+    BankersAlgorithm ba(5, 3,
+        {{0,1,0},{2,0,0},{3,0,2},{2,1,1},{0,0,2}},  // allocation
+        {{7,5,3},{3,2,2},{9,0,2},{2,2,2},{4,3,3}},  // maximum
+        {3, 3, 2}                                    // available
+    );
+
+    auto seq = ba.safety_check();
+    std::cout << "Initial state — SAFE. Sequence: ";
+    for (int p : seq) std::cout << "P" << p << " ";
+    std::cout << "\n\n";
+
+    std::cout << "P1 requests (1,0,2): ";
+    ba.request(1, {1, 0, 2});
+
+    std::cout << "\nP4 requests (3,3,0): ";
+    ba.request(4, {3, 3, 0});
+
+    return 0;
+}
+```
+
+### Python — Simple Version
+Safety Algorithm — step-by-step with verbose output showing how Work expands as each process finishes.
+
+```python
+# Banker's Algorithm — Safety Check
+# Classic 5-process, 3-resource example (Silberschatz)
+
+N, M = 5, 3  # processes, resource types
+
+allocation = [
+    [0, 1, 0],  # P0 currently holds
+    [2, 0, 0],  # P1
+    [3, 0, 2],  # P2
+    [2, 1, 1],  # P3
+    [0, 0, 2],  # P4
+]
+maximum = [
+    [7, 5, 3],  # P0 max demand
+    [3, 2, 2],  # P1
+    [9, 0, 2],  # P2
+    [2, 2, 2],  # P3
+    [4, 3, 3],  # P4
+]
+available = [3, 3, 2]  # free: A=3, B=3, C=2
+
+# Need = Maximum - Allocation
+need = [[maximum[i][j] - allocation[i][j] for j in range(M)] for i in range(N)]
+
+print("Need matrix:")
+for i in range(N): print(f"  P{i}: {need[i]}")
+print(f"Available: {available}\n")
+
+def safety_check(available, allocation, need, n, m):
+    work   = available[:]
+    finish = [False] * n
+    seq    = []
+
+    while len(seq) < n:
+        found = False
+        for i in range(n):
+            # Can process i finish with current Work resources?
+            if not finish[i] and all(need[i][j] <= work[j] for j in range(m)):
+                # Simulate it completing: add its allocation back to Work
+                work = [work[j] + allocation[i][j] for j in range(m)]
+                finish[i] = True
+                seq.append(i)
+                print(f"  P{i} can finish | Work now = {work}")
+                found = True
+        if not found:
+            break  # no progress — unsafe state
+
+    return (len(seq) == n, seq)
+
+safe, seq = safety_check(available, allocation, need, N, M)
+if safe:
+    print(f"\nSystem is SAFE. Safe sequence: {' -> '.join('P'+str(p) for p in seq)}")
+else:
+    print("\nSystem is UNSAFE!")
+```
+
+### Python — Medium Level
+Complete Banker's Algorithm (Safety + Resource Request) — LeetCode-style clean functions.
+
+```python
+def bankers_safety(allocation, maximum, available):
+    """
+    Safety Algorithm.
+    Returns a safe sequence (list of process indices) if safe, else empty list.
+    """
+    n, m = len(allocation), len(available)
+    need = [[maximum[i][j] - allocation[i][j] for j in range(m)] for i in range(n)]
+    work   = available[:]
+    finish = [False] * n
+    seq    = []
+
+    while len(seq) < n:
+        progress = False
+        for i in range(n):
+            if not finish[i] and all(need[i][j] <= work[j] for j in range(m)):
+                work   = [work[j] + allocation[i][j] for j in range(m)]
+                finish[i] = True
+                seq.append(i)
+                progress = True
+        if not progress:
+            return []  # unsafe
+    return seq
+
+
+def bankers_request(pid, request, allocation, maximum, available):
+    """
+    Resource Request Algorithm for process pid.
+    Returns (granted, new_allocation, new_available).
+    """
+    n, m = len(allocation), len(available)
+    need = [[maximum[i][j] - allocation[i][j] for j in range(m)] for i in range(n)]
+
+    # Step 1: request must not exceed declared need
+    if any(request[j] > need[pid][j] for j in range(m)):
+        return False, allocation, available
+
+    # Step 2: must be available right now
+    if any(request[j] > available[j] for j in range(m)):
+        return False, allocation, available  # must wait
+
+    # Step 3: tentative allocation
+    new_avail = [available[j] - request[j] for j in range(m)]
+    new_alloc = [row[:] for row in allocation]
+    for j in range(m):
+        new_alloc[pid][j] += request[j]
+
+    # Step 4: safety check on new state
+    if bankers_safety(new_alloc, maximum, new_avail):
+        return True, new_alloc, new_avail
+    return False, allocation, available  # rollback
+
+
+# --- Test ---
+allocation = [[0,1,0],[2,0,0],[3,0,2],[2,1,1],[0,0,2]]
+maximum    = [[7,5,3],[3,2,2],[9,0,2],[2,2,2],[4,3,3]]
+available  = [3, 3, 2]
+
+seq = bankers_safety(allocation, maximum, available)
+print(f"Initial safe sequence: {' -> '.join('P'+str(p) for p in seq)}")
+
+# P1 requests (1, 0, 2) — should be granted
+granted, a2, av2 = bankers_request(1, [1,0,2], allocation, maximum, available)
+print(f"P1 requests [1,0,2]: {'GRANTED' if granted else 'DENIED'}")
+if granted:
+    seq2 = bankers_safety(a2, maximum, av2)
+    print(f"  New safe sequence: {' -> '.join('P'+str(p) for p in seq2)}")
+
+# P4 requests (3, 3, 0) — should be denied (leaves unsafe state)
+granted2, _, _ = bankers_request(4, [3,3,0], allocation, maximum, available)
+print(f"P4 requests [3,3,0]: {'GRANTED' if granted2 else 'DENIED'}")
+
+# P0 requests (0, 2, 0) — should be denied (exceeds need)
+granted3, _, _ = bankers_request(0, [0,2,0], allocation, maximum, available)
+print(f"P0 requests [0,2,0]: {'GRANTED' if granted3 else 'DENIED'}")
+```
+
+---
+
 ## 11. Key Takeaways
 
 - The **Banker's Algorithm** avoids deadlock by checking **before every resource grant** whether the allocation keeps the system in a safe state

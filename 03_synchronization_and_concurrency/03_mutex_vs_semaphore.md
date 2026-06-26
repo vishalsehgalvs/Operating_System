@@ -337,6 +337,225 @@ Setting a mutual-exclusion semaphore to 0 by mistake means **no process can ever
 
 ---
 
+## 10. Code Examples
+
+> Working code that demonstrates mutex vs semaphore — ownership semantics vs counting/signaling.
+
+### C++ — Simple Version
+`std::mutex` guards a shared log; `std::counting_semaphore` limits a pool of database connections.
+
+```cpp
+#include <iostream>
+#include <thread>
+#include <mutex>
+#include <semaphore>          // C++20: std::counting_semaphore, std::binary_semaphore
+#include <chrono>
+
+// ============================================================
+// PART 1: std::mutex — mutual exclusion (exactly one thread at a time)
+// ============================================================
+std::mutex log_mutex;
+int log_count = 0;
+
+void write_log(int tid) {
+    // lock_guard acquires the mutex on construction, releases it on destruction
+    std::lock_guard<std::mutex> lock(log_mutex);
+    log_count++;
+    std::cout << "Thread " << tid << " wrote log entry #" << log_count << "\n";
+    // mutex released automatically when lock_guard goes out of scope
+}
+
+// ============================================================
+// PART 2: counting_semaphore — resource pool (N threads at a time)
+// ============================================================
+const int MAX_CONNECTIONS = 3;   // only 3 database connections available
+std::counting_semaphore<MAX_CONNECTIONS> db_sem(MAX_CONNECTIONS);
+
+void use_database(int tid) {
+    std::cout << "Thread " << tid << " waiting for DB connection\n";
+    db_sem.acquire();   // wait() — decrements count; blocks if count reaches 0
+    std::cout << "Thread " << tid << " GOT connection\n";
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(80));  // simulate work
+
+    std::cout << "Thread " << tid << " RELEASED connection\n";
+    db_sem.release();   // signal() — increments count; wakes one blocked thread
+}
+
+int main() {
+    std::cout << "--- Mutex Demo (one thread writes at a time) ---\n";
+    std::thread log_threads[5];
+    for (int i = 0; i < 5; i++) log_threads[i] = std::thread(write_log, i);
+    for (auto& t : log_threads) t.join();
+
+    std::cout << "\n--- Semaphore Demo (max 3 concurrent DB connections) ---\n";
+    std::thread db_threads[7];
+    for (int i = 0; i < 7; i++) db_threads[i] = std::thread(use_database, i);
+    for (auto& t : db_threads) t.join();
+
+    return 0;
+}
+```
+
+### C++ — Medium / LeetCode Style
+Demonstrates the key difference: mutex ownership (only locker can unlock) vs semaphore signaling (any thread can signal).
+
+```cpp
+#include <iostream>
+#include <thread>
+#include <mutex>
+#include <semaphore>
+#include <chrono>
+
+// --- Mutex: ownership example ---
+// unique_lock lets us lock/unlock manually while keeping RAII safety
+std::mutex data_mutex;
+int shared_data = 0;
+
+void producer_mutex() {
+    for (int i = 0; i < 3; i++) {
+        std::unique_lock<std::mutex> lock(data_mutex);
+        shared_data = i * 10;
+        std::cout << "[Mutex] Producer set data = " << shared_data << "\n";
+        // Only THIS thread (the one that locked) may unlock — ownership rule
+    }  // lock released each loop iteration
+}
+
+void consumer_mutex() {
+    for (int i = 0; i < 3; i++) {
+        std::unique_lock<std::mutex> lock(data_mutex);
+        std::cout << "[Mutex] Consumer read data = " << shared_data << "\n";
+    }
+}
+
+// --- Binary semaphore: signaling (any thread can call release) ---
+std::binary_semaphore ready_sig(0);  // initial value 0 → consumer will block first
+int produced_value = 0;
+
+void producer_sem() {
+    produced_value = 42;
+    std::cout << "[Semaphore] Producer: value ready, signaling consumer\n";
+    ready_sig.release();  // signal — consumer can now proceed
+                          // NOTE: the signaling thread is NOT the one that acquired it
+}
+
+void consumer_sem() {
+    ready_sig.acquire();  // wait — blocks until producer calls release()
+    std::cout << "[Semaphore] Consumer: got value = " << produced_value << "\n";
+}
+
+int main() {
+    std::cout << "--- Mutex (ownership) ---\n";
+    std::thread p1(producer_mutex), c1(consumer_mutex);
+    p1.join(); c1.join();
+
+    std::cout << "\n--- Binary Semaphore (cross-thread signaling) ---\n";
+    std::thread p2(producer_sem), c2(consumer_sem);
+    p2.join(); c2.join();
+
+    return 0;
+}
+```
+
+### Python — Simple Version
+`threading.Lock` for mutual exclusion; `threading.Semaphore` for a connection pool — verbose and beginner-friendly.
+
+```python
+import threading
+import time
+
+# ============================================================
+# PART 1: threading.Lock — mutex equivalent
+# ============================================================
+log_lock = threading.Lock()
+log_count = 0
+
+def write_log(tid):
+    global log_count
+    log_lock.acquire()      # block until lock is free; then take it
+    try:
+        log_count += 1
+        print(f"Thread {tid} wrote log entry #{log_count}")
+    finally:
+        log_lock.release()  # MUST always release — put in finally to avoid leaking
+
+# Idiomatic Python: use 'with' — cleaner and always releases even on exceptions
+def write_log_pythonic(tid):
+    global log_count
+    with log_lock:           # acquire on __enter__, release on __exit__
+        log_count += 1
+        print(f"Thread {tid} wrote log entry #{log_count}")
+
+# ============================================================
+# PART 2: threading.Semaphore — resource pool (N at a time)
+# ============================================================
+MAX_CONNECTIONS = 2          # only 2 simultaneous DB connections allowed
+db_semaphore = threading.Semaphore(MAX_CONNECTIONS)
+
+def use_database(tid):
+    print(f"Thread {tid} requesting connection...")
+    db_semaphore.acquire()   # wait — blocks if count is already 0
+    print(f"Thread {tid} GOT connection")
+    time.sleep(0.15)         # simulate database query
+    print(f"Thread {tid} RELEASED connection")
+    db_semaphore.release()   # signal — increments count, wakes one waiter
+
+print("--- Lock Demo ---")
+threads = [threading.Thread(target=write_log_pythonic, args=(i,)) for i in range(5)]
+for t in threads: t.start()
+for t in threads: t.join()
+
+print("\n--- Semaphore (max 2 concurrent) Demo ---")
+threads = [threading.Thread(target=use_database, args=(i,)) for i in range(6)]
+for t in threads: t.start()
+for t in threads: t.join()
+```
+
+### Python — Medium Level
+Shows the ownership difference: only the locker should unlock a Lock; any thread can signal a Semaphore.
+
+```python
+import threading
+import time
+
+# --- Semaphore for signaling (any thread can signal — no ownership) ---
+ready = threading.Semaphore(0)  # starts at 0 — consumer blocks until signaled
+result = None
+
+def producer():
+    global result
+    time.sleep(0.1)
+    result = 99
+    print("[Sem] Producer: result ready, signaling consumer")
+    ready.release()       # signal — ANY thread can call release, not just the acquirer
+
+def consumer():
+    print("[Sem] Consumer: waiting for result...")
+    ready.acquire()       # wait — blocks until producer signals
+    print(f"[Sem] Consumer: got result = {result}")
+
+print("--- Semaphore cross-thread signaling ---")
+t1 = threading.Thread(target=producer)
+t2 = threading.Thread(target=consumer)
+t1.start(); t2.start(); t1.join(); t2.join()
+
+# --- Counting semaphore: limit concurrent workers ---
+print("\n--- Counting Semaphore (max 2 at once) ---")
+pool = threading.Semaphore(2)
+
+def worker(wid):
+    with pool:   # acquire on entry, release on exit — at most 2 run simultaneously
+        print(f"Worker {wid}: running (max 2 at a time)")
+        time.sleep(0.1)
+        print(f"Worker {wid}: done")
+
+threads = [threading.Thread(target=worker, args=(i,)) for i in range(6)]
+for t in threads: t.start()
+for t in threads: t.join()
+```
+
+---
+
 ## 11. Key Takeaways
 
 - A **mutex** is a binary lock with **ownership** — only the locking process can unlock it; best for protecting single critical sections

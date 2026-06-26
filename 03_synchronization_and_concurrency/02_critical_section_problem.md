@@ -263,6 +263,218 @@ These are covered in the next topics.
 
 ---
 
+## 8. Code Examples
+
+> Working code that demonstrates Peterson's Algorithm — the classic software solution to the critical section problem.
+
+### C++ — Simple Version
+Conceptual simulation of Peterson's Algorithm showing entry/exit logic for two processes.
+
+```cpp
+#include <iostream>
+#include <string>
+
+// Peterson's Algorithm state (shared between two processes)
+bool flag[2] = {false, false};  // flag[i] = true means process i wants to enter
+int  turn    = 0;               // which process gets to enter if both want in
+
+// Entry section for process `id` (0 or 1)
+void entry_section(int id) {
+    int other = 1 - id;     // the other process (0→1, 1→0)
+    flag[id] = true;        // "I want to enter the critical section"
+    turn     = other;       // "But you can go first — I'm polite"
+
+    // Spin-wait: only enter if the other is NOT interested, OR it is my turn
+    while (flag[other] && turn == other) {
+        // busy waiting — in practice this wastes CPU; real OS uses sleep/wake
+    }
+    // CRITICAL SECTION starts here
+}
+
+// Exit section for process `id`
+void exit_section(int id) {
+    flag[id] = false;   // "I'm done — no longer interested in the critical section"
+}
+
+int main() {
+    // --- Case 1: No contention (only P0 wants to enter) ---
+    std::cout << "=== No Contention ===\n";
+    entry_section(0);
+    std::cout << "P0: inside CRITICAL SECTION\n";
+    exit_section(0);
+    std::cout << "P0: exited\n\n";
+
+    // --- Case 2: P0 inside, P1 tries to enter → P1 must block ---
+    std::cout << "=== Contention: P0 inside, P1 tries to enter ===\n";
+    entry_section(0);
+    std::cout << "P0: inside CRITICAL SECTION\n";
+
+    // P1 performs its entry protocol
+    flag[1] = true;  // P1 wants in
+    turn = 0;        // P1 says "P0 goes first"
+    bool p1_blocked = (flag[0] && turn == 0);
+    std::cout << "P1: blocked = " << std::boolalpha << p1_blocked
+              << " (mutual exclusion holds!)\n";
+
+    exit_section(0);  // P0 leaves
+    std::cout << "P0: exited — P1 may now enter (flag[0] = "
+              << std::boolalpha << flag[0] << ")\n";
+    exit_section(1);
+
+    return 0;
+}
+```
+
+### C++ — Medium / LeetCode Style
+Peterson's Algorithm with real `std::thread` — proves correctness under actual concurrency.
+
+```cpp
+#include <iostream>
+#include <thread>
+#include <atomic>
+
+// Use atomics so the compiler doesn't reorder loads/stores
+std::atomic<bool> flag0{false}, flag1{false};
+std::atomic<int>  turn{0};
+int shared_counter = 0;  // protected by Peterson's protocol
+
+void process0(int iterations) {
+    for (int i = 0; i < iterations; i++) {
+        // ENTRY SECTION (Peterson for process 0)
+        flag0.store(true, std::memory_order_seq_cst);
+        turn.store(1,     std::memory_order_seq_cst);
+        while (flag1.load(std::memory_order_seq_cst) &&
+               turn.load(std::memory_order_seq_cst) == 1) { /* spin */ }
+
+        // CRITICAL SECTION
+        shared_counter++;
+
+        // EXIT SECTION
+        flag0.store(false, std::memory_order_seq_cst);
+    }
+}
+
+void process1(int iterations) {
+    for (int i = 0; i < iterations; i++) {
+        // ENTRY SECTION (Peterson for process 1)
+        flag1.store(true, std::memory_order_seq_cst);
+        turn.store(0,     std::memory_order_seq_cst);
+        while (flag0.load(std::memory_order_seq_cst) &&
+               turn.load(std::memory_order_seq_cst) == 0) { /* spin */ }
+
+        // CRITICAL SECTION
+        shared_counter++;
+
+        // EXIT SECTION
+        flag1.store(false, std::memory_order_seq_cst);
+    }
+}
+
+int main() {
+    const int N = 50000;
+    std::thread t0(process0, N);
+    std::thread t1(process1, N);
+    t0.join(); t1.join();
+    // Peterson guarantees mutual exclusion → result is always exactly 100000
+    std::cout << "Expected: " << 2*N << ", Got: " << shared_counter << "\n";
+    return 0;
+}
+```
+
+### Python — Simple Version
+Single-threaded walkthrough of Peterson's Algorithm that shows the entry/exit protocol step by step.
+
+```python
+# Peterson's Algorithm — demonstration of the protocol logic
+# (single-threaded simulation; shows the key checks at each step)
+
+flag = [False, False]  # flag[i] = process i wants to enter CS
+turn = 0               # "polite" turn variable — whose turn it is when both want in
+
+def entry_section(pid):
+    """Entry protocol for process pid (0 or 1)."""
+    other = 1 - pid
+    flag[pid] = True    # "I want to enter"
+    global turn
+    turn = other        # "You go first" (politeness — prevents livelock)
+
+    # Wait while: other wants in AND it's the other's turn
+    while flag[other] and turn == other:
+        pass  # spin (busy wait)
+
+def exit_section(pid):
+    """Exit protocol for process pid."""
+    flag[pid] = False   # "I'm done — release my interest"
+
+def critical_section(pid):
+    """Simulated critical section work."""
+    print(f"  P{pid} → INSIDE critical section")
+
+def run(pid):
+    entry_section(pid)
+    critical_section(pid)
+    exit_section(pid)
+    print(f"  P{pid} → exited critical section")
+
+# Test 1: P0 alone — no contention
+print("=== Test 1: P0 alone ===")
+run(0)
+
+# Test 2: P1 alone — no contention
+print("\n=== Test 2: P1 alone ===")
+run(1)
+
+# Test 3: Contention — P0 inside, manually check P1's wait condition
+print("\n=== Test 3: Contention demo ===")
+flag[0] = True   # P0 wants in (or is inside)
+turn = 1         # P0 set turn = P1 (politely)
+flag[1] = True   # P1 also wants in
+turn = 0         # P1 set turn = P0 (politely)
+p1_must_wait = flag[0] and turn == 0
+print(f"  P0 is in CS, P1 checks: flag[0]={flag[0]}, turn={turn}")
+print(f"  P1 must wait: {p1_must_wait}  ← mutual exclusion holds!")
+flag[0] = False  # P0 exits
+print("  P0 exited — P1 can now enter")
+```
+
+### Python — Medium Level
+Uses `threading.Thread` to demonstrate Peterson's Algorithm under real concurrency.
+
+```python
+import threading
+
+flag = [False, False]
+turn = 0
+shared_counter = 0
+
+def process(pid, iterations):
+    global flag, turn, shared_counter
+    other = 1 - pid
+    for _ in range(iterations):
+        # ENTRY
+        flag[pid] = True
+        turn = other
+        while flag[other] and turn == other:
+            pass  # spin
+
+        # CRITICAL SECTION
+        shared_counter += 1
+
+        # EXIT
+        flag[pid] = False
+
+N = 20000
+t0 = threading.Thread(target=process, args=(0, N))
+t1 = threading.Thread(target=process, args=(1, N))
+t0.start(); t1.start()
+t0.join(); t1.join()
+print(f"Peterson's — Expected: {2*N}, Got: {shared_counter}")
+# Note: CPython's GIL provides some protection; for a true hardware-level demo
+# the C++ version with seq_cst atomics is more rigorous.
+```
+
+---
+
 ## 9. Key Takeaways
 
 - A **critical section** is code that accesses shared resources — only one process should execute it at a time

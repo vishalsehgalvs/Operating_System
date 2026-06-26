@@ -380,6 +380,344 @@ pthread_mutex_init(&mutex, &attr);
 
 ---
 
+## 10. Code Examples
+
+> Working code that demonstrates priority inversion and Priority Inheritance Protocol (PIP) in practice.
+
+### C++ — Simple Version
+Step-by-step simulation showing what goes wrong without PIP, then how PIP prevents the inversion.
+
+```cpp
+#include <iostream>
+#include <string>
+
+enum class State { RUNNING, READY, BLOCKED, DONE };
+
+struct Task {
+    std::string name;
+    int         priority;     // lower = higher urgency (1 = highest)
+    State       state;
+    bool        holds_lock;
+};
+
+void simulate_without_pip() {
+    std::cout << "=== WITHOUT Priority Inheritance ===\n\n";
+
+    Task low  = {"Low-cam",    3, State::RUNNING, false};
+    Task med  = {"Med-telemetry", 2, State::READY,   false};
+    Task high = {"High-nav",   1, State::READY,   false};
+
+    // t1: Low acquires shared lock
+    low.holds_lock = true;
+    std::cout << "t1: " << low.name << " acquires lock (priority=" << low.priority << ")\n";
+
+    // t2: High becomes ready, tries lock → blocked immediately (Low holds it)
+    high.state = State::BLOCKED;
+    low.state  = State::READY;  // High preempts Low (higher priority)
+    std::cout << "t2: " << high.name << " tries lock → BLOCKED (Low holds it)\n";
+
+    // t3: Medium (priority 2) preempts Low (priority 3) — Medium is NOT blocked
+    med.state = State::RUNNING;
+    std::cout << "t3: " << med.name << " preempts Low (Medium priority > Low priority)\n";
+    std::cout << "    *** INVERSION: High (pri=" << high.priority << ") waits while "
+              << "Medium (pri=" << med.priority << ") runs! ***\n";
+
+    // t4: Medium finishes
+    med.state = State::DONE;
+    std::cout << "t4: " << med.name << " finishes\n";
+
+    // t5: Low resumes, completes CS, releases lock
+    low.state = State::RUNNING; low.holds_lock = false;
+    std::cout << "t5: " << low.name << " releases lock\n";
+
+    // t6: High finally gets lock
+    high.state = State::RUNNING; high.holds_lock = true;
+    std::cout << "t6: " << high.name << " gets lock — delayed by Medium!\n\n";
+}
+
+void simulate_with_pip() {
+    std::cout << "=== WITH Priority Inheritance Protocol ===\n\n";
+
+    Task low  = {"Low-cam",    3, State::RUNNING, false};
+    Task med  = {"Med-telemetry", 2, State::READY,   false};
+    Task high = {"High-nav",   1, State::READY,   false};
+
+    int low_effective_priority = low.priority;  // will be temporarily changed
+
+    // t1: Low acquires lock
+    low.holds_lock = true;
+    std::cout << "t1: " << low.name << " acquires lock (priority=" << low.priority << ")\n";
+
+    // t2: High blocks → Low INHERITS High's priority
+    high.state = State::BLOCKED;
+    low_effective_priority = high.priority;   // Low now runs at priority 1 temporarily!
+    std::cout << "t2: " << high.name << " blocked → Low inherits priority "
+              << low_effective_priority << " (PIP boost)\n";
+
+    // t3: Medium tries to preempt — but Low's inherited priority (1) > Medium's (2)
+    std::cout << "t3: " << med.name << " wants CPU → CANNOT preempt Low "
+              << "(Low's effective priority " << low_effective_priority
+              << " > Med's " << med.priority << ")\n";
+
+    // t4: Low finishes CS, reverts priority, releases lock
+    low.holds_lock = false;
+    low_effective_priority = low.priority;  // reverts to 3
+    std::cout << "t4: " << low.name << " releases lock, priority reverts to "
+              << low.priority << "\n";
+
+    // t5: High gets lock immediately
+    high.state = State::RUNNING; high.holds_lock = true;
+    std::cout << "t5: " << high.name << " gets lock IMMEDIATELY — no inversion!\n\n";
+    std::cout << "Medium runs only after High finishes — priority order preserved.\n";
+}
+
+int main() {
+    simulate_without_pip();
+    simulate_with_pip();
+    return 0;
+}
+```
+
+### C++ — Medium / LeetCode Style
+Priority inheritance mutex using `std::condition_variable` — lock holder's priority is boosted when a higher-priority thread blocks.
+
+```cpp
+#include <iostream>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <chrono>
+#include <string>
+#include <atomic>
+
+// Simplified Priority Inheritance Mutex
+// Tracks who holds the lock and what priority the highest blocked waiter has
+struct PIMutex {
+    std::mutex              internal;
+    std::condition_variable cv;
+    bool                    locked = false;
+    std::string             holder;
+    std::atomic<int>        min_waiter_priority{999};  // 999 = no waiter
+
+    void lock(const std::string& name, int priority) {
+        std::unique_lock<std::mutex> lk(internal);
+        while (locked) {
+            // Priority Inheritance: tell the holder our priority so it can inherit
+            if (priority < min_waiter_priority) {
+                min_waiter_priority = priority;
+                std::cout << "  [PIP] " << name << " blocked — "
+                          << holder << " inherits priority " << priority << "\n";
+            }
+            cv.wait(lk);
+        }
+        locked = true;
+        holder = name;
+        min_waiter_priority = 999;
+        std::cout << "  [Lock] " << name << " acquired lock\n";
+    }
+
+    void unlock(const std::string& name) {
+        std::unique_lock<std::mutex> lk(internal);
+        locked = false;
+        holder = "";
+        std::cout << "  [Lock] " << name << " released lock\n";
+        cv.notify_all();
+    }
+};
+
+PIMutex pi_mtx;
+
+void low_task() {
+    pi_mtx.lock("Low", 3);
+    std::cout << "[Low ] In critical section\n";
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    pi_mtx.unlock("Low");
+    std::cout << "[Low ] Done\n";
+}
+
+void high_task() {
+    std::this_thread::sleep_for(std::chrono::milliseconds(40));  // start after Low
+    std::cout << "[High] Requesting lock...\n";
+    pi_mtx.lock("High", 1);
+    std::cout << "[High] Got lock — running!\n";
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    pi_mtx.unlock("High");
+    std::cout << "[High] Done\n";
+}
+
+void medium_task() {
+    std::this_thread::sleep_for(std::chrono::milliseconds(70));  // starts after High blocks
+    std::cout << "[Med ] Running (no lock needed)\n";
+    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+    std::cout << "[Med ] Done\n";
+}
+
+int main() {
+    std::cout << "--- Priority Inheritance Protocol ---\n";
+    std::thread tl(low_task), th(high_task), tm(medium_task);
+    tl.join(); th.join(); tm.join();
+    std::cout << "\nHigh got the lock as soon as Low released it — Med did not delay it.\n";
+    return 0;
+}
+```
+
+### Python — Simple Version
+Annotated walkthrough of both scenarios — clearly shows what changes with PIP.
+
+```python
+class Task:
+    def __init__(self, name, priority):
+        self.name       = name
+        self.priority   = priority  # lower = higher urgency
+        self.state      = "READY"
+        self.holds_lock = False
+
+    def __repr__(self):
+        return f"{self.name}(pri={self.priority}, {self.state})"
+
+
+def without_pip():
+    print("=== WITHOUT Priority Inheritance ===")
+    low  = Task("Low-cam",      3)
+    med  = Task("Med-telemetry",2)
+    high = Task("High-nav",     1)
+
+    # t1: Low acquires lock
+    low.state = "RUNNING"; low.holds_lock = True
+    print(f"t1: {low.name} acquires lock")
+
+    # t2: High becomes ready, preempts Low, tries lock → blocked
+    low.state = "READY"; high.state = "BLOCKED"
+    print(f"t2: {high.name} tries lock → BLOCKED (Low holds it)")
+
+    # t3: Med preempts Low (Med priority 2 > Low priority 3)
+    med.state = "RUNNING"
+    print(f"t3: {med.name} preempts Low!")
+    print(f"    *** INVERSION: High (pri={high.priority}) "
+          f"waits while Med (pri={med.priority}) runs ***")
+
+    # t4-t5: Med finishes, Low resumes, releases lock
+    med.state = "DONE"
+    low.state = "RUNNING"; low.holds_lock = False
+    print(f"t4: {med.name} done. t5: {low.name} releases lock")
+
+    # t6: High finally runs
+    high.state = "RUNNING"; high.holds_lock = True
+    print(f"t6: {high.name} gets lock\n"
+          f"    Total delay = Med time + remaining Low time\n")
+
+
+def with_pip():
+    print("=== WITH Priority Inheritance Protocol (PIP) ===")
+    low  = Task("Low-cam",      3)
+    med  = Task("Med-telemetry",2)
+    high = Task("High-nav",     1)
+
+    inherited = low.priority  # tracks Low's effective priority
+
+    # t1: Low acquires lock
+    low.state = "RUNNING"; low.holds_lock = True
+    print(f"t1: {low.name} acquires lock (priority={low.priority})")
+
+    # t2: High blocks → Low INHERITS High's priority
+    high.state = "BLOCKED"
+    inherited = high.priority  # Low now has effective priority 1
+    print(f"t2: {high.name} blocked → {low.name} inherits priority {inherited}")
+
+    # t3: Med tries to preempt — CANNOT (Low's inherited priority > Med's)
+    print(f"t3: {med.name} wants to preempt → BLOCKED "
+          f"(Low effective priority {inherited} > Med {med.priority})")
+
+    # t4: Low finishes, reverts priority, releases lock
+    low.holds_lock = False; inherited = low.priority  # reverts to 3
+    print(f"t4: {low.name} releases lock, priority reverts to {low.priority}")
+
+    # t5: High gets lock immediately
+    high.state = "RUNNING"; high.holds_lock = True
+    print(f"t5: {high.name} gets lock IMMEDIATELY")
+    print("    Med runs only after High — priority order preserved!\n")
+
+
+without_pip()
+with_pip()
+```
+
+### Python — Medium Level
+`threading`-based simulation with a `PriorityMutex` that boosts the holder's priority on contention.
+
+```python
+import threading
+import time
+
+class PriorityMutex:
+    """Mutex with Priority Inheritance: when a higher-priority thread blocks,
+    the holder's effective priority is raised to prevent medium tasks from preempting."""
+
+    def __init__(self, name):
+        self.name      = name
+        self._lock     = threading.Lock()
+        self._cv       = threading.Condition(self._lock)
+        self._holder   = None
+        self._inherited_priority = None  # highest-priority waiter's value
+
+    def acquire(self, task_name, priority):
+        with self._cv:
+            while self._holder is not None:
+                if self._inherited_priority is None or priority < self._inherited_priority:
+                    self._inherited_priority = priority
+                    print(f"  [PIP] '{task_name}' blocked — "
+                          f"'{self._holder}' inherits priority {priority}")
+                self._cv.wait()
+            self._holder = task_name
+            self._inherited_priority = None
+            print(f"  [Mutex] '{task_name}' acquired '{self.name}'")
+
+    def release(self, task_name):
+        with self._cv:
+            self._holder = None
+            self._inherited_priority = None
+            print(f"  [Mutex] '{task_name}' released '{self.name}'")
+            self._cv.notify_all()
+
+
+shared = PriorityMutex("sensor_data")
+
+def low_task():
+    shared.acquire("Low", priority=3)
+    print("[Low ] Critical section — processing sensor data")
+    time.sleep(0.15)   # holds lock for a while
+    shared.release("Low")
+    print("[Low ] Done")
+
+def high_task():
+    time.sleep(0.03)   # start after Low has the lock
+    print("[High] Need sensor data — requesting lock")
+    shared.acquire("High", priority=1)
+    print("[High] Got lock — running critical path!")
+    time.sleep(0.02)
+    shared.release("High")
+    print("[High] Done")
+
+def medium_task():
+    time.sleep(0.06)   # start after High is blocked
+    print("[Med ] Running (CPU-bound, no lock needed)")
+    time.sleep(0.10)
+    print("[Med ] Done")
+
+print("--- Priority Inheritance Protocol Demo ---")
+threads = [
+    threading.Thread(target=low_task),
+    threading.Thread(target=high_task),
+    threading.Thread(target=medium_task),
+]
+for t in threads: t.start()
+for t in threads: t.join()
+print("\nObserve: High got the lock as soon as Low released it.")
+print("Medium could not delay the critical High task.")
+```
+
+---
+
 ## 11. Key Takeaways
 
 - **Priority inversion** = a high-priority process waits behind a low-priority one because the low-priority process holds a shared resource (mutex/semaphore) the high-priority one needs

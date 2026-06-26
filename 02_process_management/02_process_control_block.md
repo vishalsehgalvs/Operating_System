@@ -261,6 +261,316 @@ User programs **cannot** read or write PCBs directly — this is a core security
 
 ---
 
+## 7. Code Examples
+
+> Working code that demonstrates PCB structure, creation, and context save/restore in practice.
+
+### C++ — Simple Version
+Define a PCB struct with all OS fields — create, display, and compare two PCBs.
+
+```cpp
+#include <iostream>
+#include <string>
+#include <vector>
+using namespace std;
+
+// PCB — the OS's complete record for one process
+struct PCB {
+    // --- Process identity ---
+    int    pid;         // unique process ID
+    string name;        // human-readable name
+    string state;       // NEW / READY / RUNNING / WAITING / TERMINATED
+
+    // --- CPU state (saved during context switch) ---
+    int    programCounter; // next instruction to execute
+    int    regAX;          // simulated CPU register A
+    int    regBX;          // simulated CPU register B
+
+    // --- Scheduling info ---
+    int    priority;       // lower number = higher priority
+    int    cpuTimeUsed;    // total CPU ms consumed so far
+
+    // --- Memory info ---
+    int    baseAddress;    // start of process in memory
+    int    sizeBytes;      // how much memory it owns
+
+    // --- I/O ---
+    string openFiles;      // comma-separated list of open files
+};
+
+// Create a new PCB with default CPU state
+PCB createPCB(int pid, const string& name, int priority, int base, int size) {
+    PCB pcb;
+    pcb.pid           = pid;
+    pcb.name          = name;
+    pcb.state         = "NEW";
+    pcb.programCounter = 0;    // starts at first instruction
+    pcb.regAX         = 0;
+    pcb.regBX         = 0;
+    pcb.priority      = priority;
+    pcb.cpuTimeUsed   = 0;
+    pcb.baseAddress   = base;
+    pcb.sizeBytes     = size;
+    pcb.openFiles     = "none";
+    return pcb;
+}
+
+void printPCB(const PCB& p) {
+    cout << "=== PCB [PID " << p.pid << ": " << p.name << "] ===\n";
+    cout << "  State    : " << p.state         << "\n";
+    cout << "  PC       : " << p.programCounter << "\n";
+    cout << "  Registers: AX=" << p.regAX << ", BX=" << p.regBX << "\n";
+    cout << "  Priority : " << p.priority       << "\n";
+    cout << "  CPU used : " << p.cpuTimeUsed    << " ms\n";
+    cout << "  Memory   : base=" << p.baseAddress
+         << ", size=" << p.sizeBytes << " bytes\n";
+    cout << "  Files    : " << p.openFiles      << "\n\n";
+}
+
+int main() {
+    // Create two processes
+    PCB p1 = createPCB(101, "TextEditor", 5, 4096,  2048);
+    PCB p2 = createPCB(102, "Browser",    3, 8192, 16384);
+
+    // Simulate running p1 for a while
+    p1.state          = "RUNNING";
+    p1.programCounter = 42;
+    p1.regAX          = 17;
+    p1.cpuTimeUsed    = 10;
+    p1.openFiles      = "notes.txt, config.cfg";
+
+    p2.state = "READY";
+
+    cout << "Process Table:\n\n";
+    printPCB(p1);
+    printPCB(p2);
+
+    return 0;
+}
+// Compile: g++ -std=c++17 pcb.cpp -o pcb
+```
+
+### C++ — Medium / LeetCode Style
+PCB manager with save and restore to simulate context switching between processes.
+
+```cpp
+#include <iostream>
+#include <unordered_map>
+#include <string>
+using namespace std;
+
+// CPU register snapshot — saved into PCB on context switch
+struct CPUContext {
+    int pc;    // program counter
+    int ax;    // register A
+    int bx;    // register B
+    int sp;    // stack pointer
+};
+
+struct PCB {
+    int        pid;
+    string     name;
+    string     state;
+    CPUContext ctx;       // saved CPU state
+    int        priority;
+    int        cpuUsed;   // total ms on CPU
+};
+
+// Simulates the OS Process Table — maps PID -> PCB
+// Space: O(n) where n = number of active processes
+class ProcessTable {
+    unordered_map<int, PCB> table;
+public:
+    void add(int pid, const string& name, int priority) {
+        table[pid] = {pid, name, "NEW", {0,0,0,0}, priority, 0};
+    }
+
+    // Save current CPU registers into the process's PCB
+    // Called when the running process is preempted
+    void saveContext(int pid, int pc, int ax, int bx, int sp) {
+        if (table.count(pid)) {
+            table[pid].ctx  = {pc, ax, bx, sp};
+            table[pid].state = "READY";  // no longer running
+            cout << "[CTX SAVE]    PID " << pid << " -> PC=" << pc
+                 << ", AX=" << ax << ", BX=" << bx << "\n";
+        }
+    }
+
+    // Restore CPU registers from the process's PCB
+    // Called when the process is dispatched next
+    CPUContext restoreContext(int pid) {
+        if (table.count(pid)) {
+            table[pid].state = "RUNNING";
+            CPUContext& ctx = table[pid].ctx;
+            cout << "[CTX RESTORE] PID " << pid << " -> PC=" << ctx.pc
+                 << ", AX=" << ctx.ax << ", BX=" << ctx.bx << "\n";
+            return ctx;
+        }
+        return {};
+    }
+
+    void printAll() {
+        cout << "\n--- Process Table ---\n";
+        for (auto& [pid, p] : table)
+            cout << "PID " << p.pid << " (" << p.name << ") state="
+                 << p.state << " PC=" << p.ctx.pc << "\n";
+    }
+};
+
+int main() {
+    ProcessTable pt;
+    pt.add(101, "TextEditor", 5);
+    pt.add(102, "Browser",    3);
+
+    cout << "--- Initial State ---\n";
+    pt.printAll();
+
+    cout << "\n--- PID 101 runs, then gets preempted ---\n";
+    pt.restoreContext(101);           // dispatch PID 101
+    pt.saveContext(101, 42, 17, 0, 8000);  // preempt: save its state
+
+    cout << "\n--- PID 102 gets the CPU ---\n";
+    pt.restoreContext(102);           // dispatch PID 102
+
+    pt.printAll();
+    return 0;
+}
+// Compile: g++ -std=c++17 pcb_manager.cpp -o pcb_manager
+```
+
+### Python — Simple Version
+PCB as a dataclass — create two processes, simulate saving/restoring CPU state.
+
+```python
+# PCB — Process Control Block simulation
+
+from dataclasses import dataclass, field
+
+@dataclass
+class PCB:
+    # Identity
+    pid:   int
+    name:  str
+    state: str = "NEW"
+
+    # CPU state — saved here during a context switch
+    program_counter: int = 0
+    reg_ax:          int = 0
+    reg_bx:          int = 0
+
+    # Scheduling & memory
+    priority:      int = 5
+    cpu_time_used: int = 0
+    base_address:  int = 0
+    size_bytes:    int = 0
+
+    # I/O
+    open_files: list = field(default_factory=list)
+
+    def display(self):
+        print(f"=== PCB [PID {self.pid}: {self.name}] ===")
+        print(f"  State      : {self.state}")
+        print(f"  PC         : {self.program_counter}")
+        print(f"  Registers  : AX={self.reg_ax}, BX={self.reg_bx}")
+        print(f"  Priority   : {self.priority}")
+        print(f"  CPU used   : {self.cpu_time_used} ms")
+        print(f"  Memory     : base={self.base_address}, size={self.size_bytes}")
+        print(f"  Open files : {self.open_files}\n")
+
+
+# Create two processes
+p1 = PCB(pid=101, name="TextEditor", priority=5,
+         base_address=4096, size_bytes=2048)
+p2 = PCB(pid=102, name="Browser",    priority=3,
+         base_address=8192, size_bytes=16384)
+
+# Simulate p1 running for a while
+p1.state           = "RUNNING"
+p1.program_counter = 42
+p1.reg_ax          = 17
+p1.cpu_time_used   = 10
+p1.open_files      = ["notes.txt", "config.cfg"]
+p2.state           = "READY"
+
+print("Process Table:\n")
+p1.display()
+p2.display()
+```
+
+### Python — Medium Level
+ProcessTable class with save/restore context — simulates what the OS does on every context switch.
+
+```python
+from dataclasses import dataclass, field
+from typing import Optional
+
+@dataclass
+class CPUContext:
+    """Snapshot of CPU registers saved into a PCB."""
+    pc: int = 0   # program counter
+    ax: int = 0   # register A
+    bx: int = 0   # register B
+    sp: int = 0   # stack pointer
+
+@dataclass
+class PCB:
+    pid:      int
+    name:     str
+    state:    str = "NEW"
+    ctx:      CPUContext = field(default_factory=CPUContext)
+    priority: int = 5
+    cpu_used: int = 0
+
+
+class ProcessTable:
+    """OS-level table that maps PID -> PCB.
+    Space: O(n) where n = number of active processes
+    """
+    def __init__(self):
+        self._table: dict[int, PCB] = {}
+
+    def add(self, pid: int, name: str, priority: int = 5) -> None:
+        self._table[pid] = PCB(pid=pid, name=name, priority=priority)
+
+    def save_context(self, pid: int, pc: int, ax: int, bx: int, sp: int) -> None:
+        """Save CPU state into PCB when process is preempted."""
+        p = self._table[pid]
+        p.ctx   = CPUContext(pc, ax, bx, sp)
+        p.state = "READY"
+        print(f"[SAVE]    PID {pid:>3} | PC={pc}, AX={ax}, BX={bx}")
+
+    def restore_context(self, pid: int) -> CPUContext:
+        """Load CPU state from PCB when process is dispatched."""
+        p = self._table[pid]
+        p.state = "RUNNING"
+        print(f"[RESTORE] PID {pid:>3} | PC={p.ctx.pc}, AX={p.ctx.ax}, BX={p.ctx.bx}")
+        return p.ctx
+
+    def print_table(self) -> None:
+        print("\n--- Process Table ---")
+        for p in self._table.values():
+            print(f"  PID {p.pid} ({p.name:12}) state={p.state:10} PC={p.ctx.pc}")
+
+
+if __name__ == "__main__":
+    pt = ProcessTable()
+    pt.add(101, "TextEditor", priority=5)
+    pt.add(102, "Browser",    priority=3)
+
+    pt.print_table()
+
+    print("\n--- Dispatch PID 101 ---")
+    pt.restore_context(101)
+
+    print("\n--- Preempt PID 101, dispatch PID 102 ---")
+    pt.save_context(101, pc=42, ax=17, bx=0, sp=8000)
+    pt.restore_context(102)
+
+    pt.print_table()
+```
+
+---
+
 ## 8. Key Takeaways
 
 - A **PCB** is the OS's complete data record for a process — created on start, deleted on termination.

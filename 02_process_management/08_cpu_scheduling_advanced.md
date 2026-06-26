@@ -315,6 +315,374 @@ Two queues:
 
 ---
 
+## 5. Code Examples
+
+> Working code that demonstrates Round Robin and Priority Scheduling with an ASCII Gantt chart in practice.
+
+### C++ — Simple Version
+Round Robin with a configurable time quantum — equal turns for every process.
+
+```cpp
+#include <iostream>
+#include <queue>
+#include <vector>
+#include <algorithm>
+using namespace std;
+
+struct Process {
+    int pid, arrival, burst, remaining;
+    int finish = 0, wait = 0;
+};
+
+// Round Robin scheduler with configurable time quantum
+// Each process gets a turn of 'quantum' ms before being preempted
+void roundRobin(vector<Process>& procs, int quantum) {
+    queue<int> rq;          // indices into procs
+    int clock = 0, done = 0;
+    int n = procs.size();
+    vector<bool> inQueue(n, false);
+
+    // Enqueue processes that arrive at t=0
+    for (int i = 0; i < n; i++)
+        if (procs[i].arrival == 0) { rq.push(i); inQueue[i] = true; }
+
+    cout << "--- Round Robin (quantum=" << quantum << ") Gantt Chart ---\n";
+
+    while (done < n) {
+        if (rq.empty()) {  // CPU idle — jump to next arrival
+            clock++;
+            for (int i = 0; i < n; i++)
+                if (!inQueue[i] && procs[i].arrival <= clock)
+                    { rq.push(i); inQueue[i] = true; }
+            continue;
+        }
+
+        int idx = rq.front(); rq.pop();
+        Process& p = procs[idx];
+        int runFor = min(quantum, p.remaining);
+
+        cout << "t=" << clock << "  P" << p.pid
+             << " runs " << runFor << " units";
+
+        clock        += runFor;
+        p.remaining  -= runFor;
+
+        // Enqueue new arrivals during this time slice
+        for (int i = 0; i < n; i++)
+            if (!inQueue[i] && procs[i].arrival <= clock)
+                { rq.push(i); inQueue[i] = true; }
+
+        if (p.remaining == 0) {
+            p.finish = clock;
+            p.wait   = p.finish - p.arrival - p.burst;
+            done++;
+            cout << "  [DONE]";
+        } else {
+            rq.push(idx);  // back of the queue
+        }
+        cout << "\n";
+    }
+
+    double avgW = 0;
+    for (auto& p : procs) avgW += p.wait;
+    cout << "Avg wait = " << avgW / n << " ms\n";
+}
+
+int main() {
+    vector<Process> procs = {
+        {1, 0, 10, 10},
+        {2, 0,  4,  4},
+        {3, 0,  6,  6},
+    };
+    roundRobin(procs, 3);
+    return 0;
+}
+// Compile: g++ -std=c++17 round_robin.cpp -o round_robin
+```
+
+### C++ — Medium / LeetCode Style
+Priority Scheduling with aging (prevents starvation) + ASCII Gantt chart output.
+
+```cpp
+#include <iostream>
+#include <vector>
+#include <algorithm>
+#include <string>
+using namespace std;
+
+// Priority Scheduling with Aging to prevent starvation
+// Aging: every AGING_INTERVAL ticks, increase priority of waiting processes
+// Time: O(total_burst * n), Space: O(n)
+
+struct Process {
+    int pid, arrival, burst, remaining;
+    int priority;    // lower = higher priority (1 is highest)
+    int finish = 0, wait = 0;
+    int dynPriority;  // dynamic priority after aging
+};
+
+const int AGING_INTERVAL = 3;  // boost priority every 3 ticks
+
+void printGantt(const vector<pair<int,int>>& gantt) {
+    cout << "\n--- ASCII Gantt Chart ---\n";
+    // Top bar: process labels
+    for (auto& [pid, len] : gantt) {
+        string block = "| P" + to_string(pid);
+        block += string(max(0, len - (int)block.size() + 1), ' ');
+        cout << block;
+    }
+    cout << "|\n";
+    // Bottom bar: time markers
+    int t = 0;
+    cout << "0";
+    for (auto& [pid, len] : gantt) {
+        t += len;
+        cout << string(len, '-') << t;
+    }
+    cout << "\n";
+}
+
+void priorityWithAging(vector<Process>& procs) {
+    int n = procs.size(), done = 0, clock = 0;
+    for (auto& p : procs) p.dynPriority = p.priority;
+    vector<pair<int,int>> gantt;  // (pid, duration) for chart
+    int lastPid = -1, sliceDur = 0;
+
+    while (done < n) {
+        // Find arrived process with best (lowest) dynamic priority
+        int sel = -1;
+        for (int i = 0; i < n; i++) {
+            if (procs[i].remaining > 0 && procs[i].arrival <= clock) {
+                if (sel == -1 || procs[i].dynPriority < procs[sel].dynPriority)
+                    sel = i;
+            }
+        }
+        if (sel == -1) { clock++; continue; }  // CPU idle
+
+        // Run selected process for 1 tick
+        Process& p = procs[sel];
+        if (lastPid != p.pid) {
+            if (lastPid != -1) gantt.push_back({lastPid, sliceDur});
+            lastPid = p.pid; sliceDur = 0;
+        }
+        p.remaining--;
+        sliceDur++;
+        clock++;
+
+        if (p.remaining == 0) {
+            p.finish = clock;
+            p.wait   = p.finish - p.arrival - p.burst;
+            done++;
+        }
+
+        // Aging: boost waiting processes every AGING_INTERVAL ticks
+        if (clock % AGING_INTERVAL == 0) {
+            for (int i = 0; i < n; i++) {
+                if (procs[i].remaining > 0 && i != sel)
+                    procs[i].dynPriority = max(1, procs[i].dynPriority - 1);
+            }
+        }
+    }
+    if (sliceDur > 0) gantt.push_back({lastPid, sliceDur});
+
+    printGantt(gantt);
+
+    cout << "\n--- Results ---\n";
+    double avgW = 0;
+    for (auto& p : procs) {
+        cout << "P" << p.pid << " wait=" << p.wait
+             << " TAT=" << (p.finish - p.arrival) << "\n";
+        avgW += p.wait;
+    }
+    cout << "Avg wait = " << avgW / n << " ms\n";
+}
+
+int main() {
+    vector<Process> procs = {
+        {1, 0, 10, 10, 3, 0, 0, 3},  // pid, arr, burst, rem, priority
+        {2, 0,  4,  4, 1, 0, 0, 1},  // highest priority
+        {3, 0,  6,  6, 2, 0, 0, 2},
+    };
+    priorityWithAging(procs);
+    return 0;
+}
+// Compile: g++ -std=c++17 priority_aging.cpp -o priority_aging
+```
+
+### Python — Simple Version
+Round Robin with configurable quantum — equal turns, no starvation.
+
+```python
+# Round Robin scheduler with configurable time quantum
+from collections import deque
+
+class Process:
+    def __init__(self, pid, arrival, burst):
+        self.pid       = pid
+        self.arrival   = arrival
+        self.burst     = burst
+        self.remaining = burst
+        self.finish    = 0
+        self.wait      = 0
+
+
+def round_robin(processes: list[Process], quantum: int = 3) -> None:
+    procs  = sorted(processes, key=lambda p: p.arrival)
+    ready  = deque()
+    clock  = 0
+    done   = 0
+    n      = len(procs)
+    queued = [False] * n
+
+    # Seed queue with t=0 arrivals
+    for i, p in enumerate(procs):
+        if p.arrival == 0:
+            ready.append(i); queued[i] = True
+
+    print(f"--- Round Robin (quantum={quantum}) ---")
+
+    while done < n:
+        if not ready:
+            clock += 1
+            # Admit any newly arrived processes
+            for i, p in enumerate(procs):
+                if not queued[i] and p.arrival <= clock:
+                    ready.append(i); queued[i] = True
+            continue
+
+        idx = ready.popleft()
+        p   = procs[idx]
+        run_for     = min(quantum, p.remaining)
+        print(f"t={clock:>3}  P{p.pid} runs {run_for} units", end="")
+
+        clock       += run_for
+        p.remaining -= run_for
+
+        # Admit arrivals during this slice
+        for i, proc in enumerate(procs):
+            if not queued[i] and proc.arrival <= clock:
+                ready.append(i); queued[i] = True
+
+        if p.remaining == 0:
+            p.finish = clock
+            p.wait   = p.finish - p.arrival - p.burst
+            done    += 1
+            print("  [DONE]")
+        else:
+            ready.append(idx)
+            print()
+
+    avg_w = sum(p.wait for p in procs) / n
+    print(f"\nAvg wait = {avg_w:.2f} ms")
+
+
+procs = [
+    Process(1, 0, 10),
+    Process(2, 0,  4),
+    Process(3, 0,  6),
+]
+round_robin(procs, quantum=3)
+```
+
+### Python — Medium Level
+Priority scheduling with aging to prevent starvation, plus ASCII Gantt chart output.
+
+```python
+from dataclasses import dataclass, field
+
+@dataclass
+class Process:
+    pid:      int
+    arrival:  int
+    burst:    int
+    priority: int          # static priority (lower = higher priority)
+    remaining: int = field(init=False)
+    dyn_priority: int = field(init=False)  # aging boosts this over time
+    finish:   int = 0
+    wait:     int = 0
+
+    def __post_init__(self):
+        self.remaining    = self.burst
+        self.dyn_priority = self.priority
+
+
+AGING_INTERVAL = 3  # boost waiting processes every N ticks
+
+
+def priority_with_aging(processes: list[Process]) -> None:
+    """Preemptive priority scheduling with aging.
+    Aging prevents starvation by reducing priority value of waiting processes.
+    Time: O(total_burst * n), Space: O(n)
+    """
+    procs = list(processes)
+    n     = len(procs)
+    clock = 0
+    done  = 0
+    gantt: list[tuple[int, int]] = []  # (pid, end_time)
+    last_pid = -1
+
+    while done < n:
+        # Find arrived process with best (lowest) dynamic priority
+        candidates = [p for p in procs if p.remaining > 0 and p.arrival <= clock]
+        if not candidates:
+            clock += 1; continue
+
+        sel = min(candidates, key=lambda p: p.dyn_priority)
+
+        if not gantt or gantt[-1][0] != sel.pid:
+            gantt.append((sel.pid, clock))  # record slice start
+
+        sel.remaining -= 1
+        clock += 1
+
+        if sel.remaining == 0:
+            sel.finish = clock
+            sel.wait   = sel.finish - sel.arrival - sel.burst
+            done      += 1
+
+        # Aging: every AGING_INTERVAL ticks, boost waiting processes
+        if clock % AGING_INTERVAL == 0:
+            for p in procs:
+                if p.remaining > 0 and p is not sel:
+                    p.dyn_priority = max(1, p.dyn_priority - 1)  # age up
+
+    # Print ASCII Gantt chart
+    print("--- ASCII Gantt Chart ---")
+    slices: list[tuple[int,int,int]] = []  # (pid, start, end)
+    for i, (pid, start) in enumerate(gantt):
+        end = gantt[i + 1][1] if i + 1 < len(gantt) else clock
+        if slices and slices[-1][0] == pid:
+            slices[-1] = (pid, slices[-1][1], end)  # merge consecutive
+        else:
+            slices.append((pid, start, end))
+
+    bar = ""
+    times = "0"
+    for pid, start, end in slices:
+        width = end - start
+        bar  += f"| P{pid} " + " " * max(0, width - 4)
+        times += "-" * width + str(end)
+    print(bar + "|")
+    print(times)
+
+    print("\n--- Results ---")
+    avg_w = sum(p.wait for p in procs) / n
+    for p in procs:
+        print(f"P{p.pid}  wait={p.wait:>3}  TAT={p.finish - p.arrival:>3}")
+    print(f"Avg wait = {avg_w:.2f} ms")
+
+
+if __name__ == "__main__":
+    jobs = [
+        Process(1, 0, 10, priority=3),   # low priority
+        Process(2, 0,  4, priority=1),   # highest priority
+        Process(3, 0,  6, priority=2),   # medium priority
+    ]
+    priority_with_aging(jobs)
+```
+
+---
+
 ## 6. Key Takeaways
 
 - **HRRN** = SJF + fairness. Response Ratio = (Wait + Burst) / Burst. Longer-waiting processes grow their ratio → no starvation. Non-preemptive.

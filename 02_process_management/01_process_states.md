@@ -227,6 +227,285 @@ Preemption (Running → Ready) lets high-priority processes cut in line, prevent
 
 ---
 
+## 9. Code Examples
+
+> Working code that demonstrates process state transitions in practice.
+
+### C++ — Simple Version
+Process class with five states and guarded transition methods.
+
+```cpp
+#include <iostream>
+#include <string>
+using namespace std;
+
+// The five process states from OS theory
+enum State { NEW, READY, RUNNING, WAITING, TERMINATED };
+
+string stateName(State s) {
+    switch (s) {
+        case NEW:        return "NEW";
+        case READY:      return "READY";
+        case RUNNING:    return "RUNNING";
+        case WAITING:    return "WAITING";
+        case TERMINATED: return "TERMINATED";
+    }
+    return "UNKNOWN";
+}
+
+struct Process {
+    int    pid;
+    string name;
+    State  state;
+
+    Process(int id, string n) : pid(id), name(n), state(NEW) {}
+
+    void log(const string& from, const string& to, const string& why) {
+        cout << "[PID " << pid << "] " << name << ": "
+             << from << " -> " << to << " (" << why << ")\n";
+    }
+
+    // NEW -> READY: OS loads process into memory
+    void admit() {
+        if (state == NEW) { state = READY; log("NEW", "READY", "admitted"); }
+    }
+
+    // READY -> RUNNING: CPU dispatcher picks this process
+    void dispatch() {
+        if (state == READY) { state = RUNNING; log("READY", "RUNNING", "CPU assigned"); }
+    }
+
+    // RUNNING -> WAITING: process issued an I/O request
+    void waitIO() {
+        if (state == RUNNING) { state = WAITING; log("RUNNING", "WAITING", "I/O request"); }
+    }
+
+    // WAITING -> READY: I/O completed — back in the queue
+    void ioComplete() {
+        if (state == WAITING) { state = READY; log("WAITING", "READY", "I/O done"); }
+    }
+
+    // RUNNING -> READY: time slice expired, forced off CPU
+    void preempt() {
+        if (state == RUNNING) { state = READY; log("RUNNING", "READY", "preempted"); }
+    }
+
+    // RUNNING -> TERMINATED: process finished execution
+    void finish() {
+        if (state == RUNNING) { state = TERMINATED; log("RUNNING", "TERMINATED", "finished"); }
+    }
+};
+
+int main() {
+    Process p(101, "TextEditor");
+    cout << "Start: " << stateName(p.state) << "\n\n";
+
+    p.admit();       // OS loads it into memory
+    p.dispatch();    // Scheduler picks it up
+    p.waitIO();      // Process reads a file from disk
+    p.ioComplete();  // Disk read finished
+    p.dispatch();    // Gets CPU again
+    p.preempt();     // Time slice expired
+    p.dispatch();    // Back on CPU
+    p.finish();      // Execution complete
+
+    cout << "\nFinal: " << stateName(p.state) << "\n";
+    return 0;
+}
+// Compile: g++ -std=c++17 process_states.cpp -o process_states
+```
+
+### C++ — Medium / LeetCode Style
+Round-robin scheduler loop driving all five state transitions for multiple processes simultaneously.
+
+```cpp
+#include <iostream>
+#include <queue>
+#include <vector>
+#include <string>
+#include <algorithm>
+using namespace std;
+
+// Round-robin process scheduler
+// Time: O(total_burst / quantum), Space: O(n)
+
+struct Process {
+    int    pid;
+    string name;
+    int    burst;      // total CPU time needed
+    int    remaining;  // CPU time left
+    string state;
+
+    Process(int id, string n, int b)
+        : pid(id), name(n), burst(b), remaining(b), state("READY") {}
+};
+
+int main() {
+    vector<Process> procs = {
+        {1, "Chrome",   5},
+        {2, "VSCode",   3},
+        {3, "Terminal", 4},
+    };
+
+    const int QUANTUM = 2;  // time slice in ms
+    queue<int> readyQ;      // stores indices into procs
+    int clock = 0;
+
+    // Admit all: NEW -> READY
+    for (int i = 0; i < (int)procs.size(); i++) {
+        readyQ.push(i);
+        cout << "t=0  PID " << procs[i].pid << " admitted -> READY\n";
+    }
+
+    cout << "\n--- Gantt Chart ---\n";
+
+    while (!readyQ.empty()) {
+        int idx = readyQ.front();
+        readyQ.pop();
+        Process& p = procs[idx];
+
+        // READY -> RUNNING
+        p.state = "RUNNING";
+        int runFor = min(QUANTUM, p.remaining);
+        cout << "t=" << clock << "  PID " << p.pid
+             << " RUNNING (" << runFor << " units)\n";
+
+        clock     += runFor;
+        p.remaining -= runFor;
+
+        if (p.remaining == 0) {
+            // RUNNING -> TERMINATED
+            p.state = "TERMINATED";
+            cout << "t=" << clock << "  PID " << p.pid
+                 << " TERMINATED (TAT=" << clock << ")\n";
+        } else {
+            // RUNNING -> READY (preempted by quantum)
+            p.state = "READY";
+            readyQ.push(idx);
+            cout << "t=" << clock << "  PID " << p.pid
+                 << " READY (" << p.remaining << " left)\n";
+        }
+    }
+
+    cout << "\nAll processes terminated at t=" << clock << "\n";
+    return 0;
+}
+// Compile: g++ -std=c++17 rr_scheduler.cpp -o rr_scheduler
+```
+
+### Python — Simple Version
+Process with state validation — only legal transitions are allowed.
+
+```python
+# Process state machine with transition validation
+
+class Process:
+    # Each state lists the states it can legally move to
+    VALID_NEXT = {
+        "NEW":        {"READY"},
+        "READY":      {"RUNNING"},
+        "RUNNING":    {"WAITING", "READY", "TERMINATED"},
+        "WAITING":    {"READY"},
+        "TERMINATED": set()
+    }
+
+    def __init__(self, pid, name):
+        self.pid   = pid
+        self.name  = name
+        self.state = "NEW"
+
+    def transition(self, new_state):
+        """Move to new_state only if the transition is valid."""
+        if new_state in self.VALID_NEXT[self.state]:
+            old = self.state
+            self.state = new_state
+            print(f"[PID {self.pid}] {self.name}: {old} -> {new_state}")
+        else:
+            print(f"[PID {self.pid}] BLOCKED: {self.state} -> {new_state} is not valid")
+
+
+p = Process(101, "TextEditor")
+print(f"Start: {p.state}\n")
+
+p.transition("READY")       # OS admits to memory
+p.transition("RUNNING")     # CPU dispatched
+p.transition("WAITING")     # Needs disk I/O
+p.transition("RUNNING")     # BLOCKED — WAITING must go to READY first
+p.transition("READY")       # I/O done, re-enters queue
+p.transition("RUNNING")     # CPU again
+p.transition("TERMINATED")  # Execution complete
+
+print(f"\nFinal: {p.state}")
+```
+
+### Python — Medium Level
+Round-robin scheduler showing all transitions across multiple processes with turnaround time stats.
+
+```python
+from collections import deque
+from dataclasses import dataclass, field
+
+@dataclass
+class Process:
+    pid:   int
+    name:  str
+    burst: int
+    remaining: int = field(init=False)
+    state: str = "NEW"
+    finish_time: int = 0
+
+    def __post_init__(self):
+        self.remaining = self.burst
+
+
+def round_robin(processes: list["Process"], quantum: int = 2) -> None:
+    """Round-robin scheduler with state transition log.
+    Time: O(total_burst), Space: O(n)
+    """
+    ready: deque[Process] = deque()
+
+    # Admit all: NEW -> READY
+    for p in processes:
+        p.state = "READY"
+        ready.append(p)
+        print(f"Admitted PID {p.pid} ({p.name}) -> READY")
+
+    clock = 0
+    print("\n--- Gantt Chart ---")
+
+    while ready:
+        p = ready.popleft()
+        p.state = "RUNNING"
+        run_for = min(quantum, p.remaining)
+        print(f"t={clock:>3}  PID {p.pid} RUNNING ({run_for} units)")
+
+        clock       += run_for
+        p.remaining -= run_for
+
+        if p.remaining == 0:
+            p.state = "TERMINATED"
+            p.finish_time = clock
+            tat = clock  # arrival=0 for all in this example
+            print(f"t={clock:>3}  PID {p.pid} TERMINATED  TAT={tat}")
+        else:
+            p.state = "READY"
+            ready.append(p)
+            print(f"t={clock:>3}  PID {p.pid} READY (preempted, {p.remaining} left)")
+
+    print(f"\nAll done at t={clock}")
+
+
+if __name__ == "__main__":
+    jobs = [
+        Process(1, "Chrome",   burst=5),
+        Process(2, "VSCode",   burst=3),
+        Process(3, "Terminal", burst=4),
+    ]
+    round_robin(jobs, quantum=2)
+```
+
+---
+
 ## 10. Key Takeaways
 
 - A **process** = program actively running in memory with CPU, memory, and I/O resources allocated.

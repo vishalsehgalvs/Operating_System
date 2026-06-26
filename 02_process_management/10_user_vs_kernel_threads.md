@@ -276,6 +276,329 @@ A web server handles many client connections, each in a separate thread:
 
 ---
 
+## 7. Code Examples
+
+> Working code that demonstrates Many-to-One, One-to-One, and Many-to-Many threading models in practice.
+
+### C++ — Simple Version
+Simulate Many-to-One (N user threads share 1 kernel thread) and One-to-One (each user thread has its own kernel thread).
+
+```cpp
+#include <iostream>
+#include <vector>
+#include <string>
+using namespace std;
+
+// --- Model 1: Many-to-One (N:1) ---
+// All user threads are managed in user space.
+// Only one kernel thread exists — OS sees only one thread.
+// If any user thread blocks on I/O, ALL threads are blocked.
+
+struct UserThread {
+    int id;
+    string task;
+    bool blocked = false;  // true if waiting on I/O
+};
+
+void manyToOne(vector<UserThread> threads) {
+    cout << "=== Many-to-One Model (N user threads -> 1 kernel thread) ===\n";
+    cout << "Kernel thread: 1 (OS sees only this)\n\n";
+
+    for (auto& ut : threads) {
+        if (ut.blocked) {
+            cout << "  UserThread " << ut.id << " blocked on I/O\n";
+            cout << "  *** ALL threads blocked! Kernel thread can't run others ***\n";
+            break;
+        }
+        cout << "  UserThread " << ut.id << " running: " << ut.task << "\n";
+        // Note: only runs one at a time — no true parallelism possible
+    }
+}
+
+// --- Model 2: One-to-One (1:1) ---
+// Each user thread maps to its own kernel thread.
+// OS manages each thread independently.
+// One blocking thread doesn't block others.
+// True parallelism on multi-core CPUs.
+
+struct KernelThread {
+    int id;
+    int userThreadId;  // which user thread it serves
+};
+
+void oneToOne(vector<UserThread> threads) {
+    cout << "\n=== One-to-One Model (each user thread -> own kernel thread) ===\n";
+    cout << "Kernel threads: " << threads.size() << " (one per user thread)\n\n";
+
+    vector<KernelThread> kthreads;
+    for (auto& ut : threads)
+        kthreads.push_back({ut.id, ut.id});
+
+    for (int i = 0; i < (int)threads.size(); i++) {
+        if (threads[i].blocked) {
+            cout << "  KThread " << kthreads[i].id
+                 << " blocked (UserThread " << threads[i].id << " on I/O)\n";
+            cout << "  -> Other kernel threads keep running! No global block.\n";
+        } else {
+            cout << "  KThread " << kthreads[i].id
+                 << " running: " << threads[i].task << "\n";
+        }
+    }
+}
+
+int main() {
+    vector<UserThread> threads = {
+        {1, "handle request A", false},
+        {2, "read from disk",   true},   // this one blocks
+        {3, "compute hash",     false},
+    };
+
+    manyToOne(threads);
+    oneToOne(threads);
+    return 0;
+}
+// Compile: g++ -std=c++17 thread_models.cpp -o thread_models
+```
+
+### C++ — Medium / LeetCode Style
+Simulate all three models (Many-to-One, One-to-One, Many-to-Many) with a scheduler showing how user threads map to kernel threads.
+
+```cpp
+#include <iostream>
+#include <vector>
+#include <queue>
+#include <string>
+using namespace std;
+
+// Thread model simulation: how user threads map to kernel threads
+// Time: O(n * tasks), Space: O(n + k)
+
+struct UserThread {
+    int    id;
+    string task;
+    bool   isBlocked;   // simulates I/O wait
+    int    mappedKThread = -1;  // which kernel thread serves it (-1 = none)
+};
+
+struct KernelThread {
+    int  id;
+    bool busy = false;
+    int  servingUT = -1;  // user thread currently on this KT
+};
+
+// --- Many-to-One: all UTs share 1 KT ---
+void manyToOne(vector<UserThread> uts) {
+    cout << "=== Many-to-One (N:" << uts.size() << " -> 1:1 KT) ===\n";
+    KernelThread kt{0};
+    for (auto& ut : uts) {
+        if (ut.isBlocked) {
+            cout << "  UT" << ut.id << " blocked -> KT0 blocked -> ALL UTs blocked!\n";
+            return;  // entire process stalls
+        }
+        cout << "  UT" << ut.id << " running on KT0: " << ut.task << "\n";
+        // Sequential — no parallelism
+    }
+}
+
+// --- One-to-One: each UT gets its own KT ---
+void oneToOne(vector<UserThread> uts) {
+    cout << "\n=== One-to-One (1:1) === [" << uts.size() << " kernel threads] ===\n";
+    vector<KernelThread> kts(uts.size());
+    for (int i = 0; i < (int)kts.size(); i++) kts[i].id = i;
+
+    for (int i = 0; i < (int)uts.size(); i++) {
+        uts[i].mappedKThread = i;
+        if (uts[i].isBlocked)
+            cout << "  UT" << uts[i].id << " blocked on KT" << i
+                 << " -> other KTs unaffected\n";
+        else
+            cout << "  UT" << uts[i].id << " runs on KT" << i
+                 << ": " << uts[i].task << "\n";
+    }
+}
+
+// --- Many-to-Many: M user threads on N kernel threads (M > N) ---
+// The runtime multiplexes UTs onto available KTs
+// If a UT blocks, its KT picks up another UT
+void manyToMany(vector<UserThread> uts, int numKThreads) {
+    cout << "\n=== Many-to-Many (" << uts.size() << " UTs on "
+         << numKThreads << " KTs) ===\n";
+
+    vector<KernelThread> kts(numKThreads);
+    for (int i = 0; i < numKThreads; i++) kts[i].id = i;
+
+    queue<int> freeKTs;
+    for (int i = 0; i < numKThreads; i++) freeKTs.push(i);
+
+    for (auto& ut : uts) {
+        if (freeKTs.empty()) {
+            cout << "  UT" << ut.id << " waiting (all KTs busy)...\n";
+            freeKTs.push(0);  // simulate one KT becoming free
+        }
+        int kt = freeKTs.front(); freeKTs.pop();
+        if (ut.isBlocked) {
+            cout << "  UT" << ut.id << " -> KT" << kt
+                 << " blocked, runtime reschedules KT" << kt << " to next UT\n";
+            freeKTs.push(kt);  // KT freed immediately (runtime handles block)
+        } else {
+            cout << "  UT" << ut.id << " runs on KT" << kt
+                 << ": " << ut.task << "\n";
+        }
+    }
+}
+
+int main() {
+    vector<UserThread> uts = {
+        {1, "handle request A", false},
+        {2, "read from disk",   true },   // blocks
+        {3, "compute hash",     false},
+        {4, "render frame",     false},
+    };
+
+    manyToOne(uts);
+    oneToOne(uts);
+    manyToMany(uts, 2);  // 4 user threads, only 2 kernel threads
+    return 0;
+}
+// Compile: g++ -std=c++17 thread_models_all.cpp -o thread_models_all
+```
+
+### Python — Simple Version
+Mock UserThread and KernelThread classes — show how Many-to-One vs One-to-One behave when one thread blocks.
+
+```python
+# User-level vs Kernel-level thread model simulation
+
+class UserThread:
+    def __init__(self, uid, task, blocks=False):
+        self.uid    = uid
+        self.task   = task
+        self.blocks = blocks   # simulates I/O blocking
+
+class KernelThread:
+    def __init__(self, kid):
+        self.kid    = kid
+        self.busy   = False
+
+
+# --- Many-to-One: ALL user threads share ONE kernel thread ---
+def many_to_one(user_threads: list[UserThread]) -> None:
+    print("=== Many-to-One (N user threads -> 1 kernel thread) ===")
+    kt = KernelThread(0)
+
+    for ut in user_threads:
+        if ut.blocks:
+            print(f"  UT{ut.uid} blocked on I/O -> KT0 blocked")
+            print("  *** Whole process stalled! No other UT can run. ***")
+            return
+        print(f"  UT{ut.uid} runs on KT0: {ut.task}")
+
+
+# --- One-to-One: each user thread has its own kernel thread ---
+def one_to_one(user_threads: list[UserThread]) -> None:
+    print("\n=== One-to-One (each user thread -> own kernel thread) ===")
+    kthreads = [KernelThread(i) for i in range(len(user_threads))]
+
+    for i, ut in enumerate(user_threads):
+        kt = kthreads[i]
+        if ut.blocks:
+            print(f"  UT{ut.uid} blocked on KT{kt.kid} -> other KTs keep running!")
+        else:
+            print(f"  UT{ut.uid} runs on KT{kt.kid}: {ut.task}")
+
+
+# Demo
+threads = [
+    UserThread(1, "handle request A", blocks=False),
+    UserThread(2, "read from disk",   blocks=True),   # this one blocks
+    UserThread(3, "compute hash",     blocks=False),
+]
+
+many_to_one(threads)
+one_to_one(threads)
+```
+
+### Python — Medium Level
+Simulate all three models with a Many-to-Many runtime that reschedules kernel threads when a user thread blocks.
+
+```python
+from collections import deque
+from dataclasses import dataclass, field
+
+@dataclass
+class UserThread:
+    uid:    int
+    task:   str
+    blocks: bool = False
+    mapped_kt: int = -1
+
+@dataclass
+class KernelThread:
+    kid:  int
+    busy: bool = False
+
+
+def many_to_one(uts: list[UserThread]) -> None:
+    """All UTs share one KT. One block = everyone blocks."""
+    print("=== Many-to-One ===")
+    for ut in uts:
+        if ut.blocks:
+            print(f"  UT{ut.uid} I/O block -> KT0 blocked -> ALL UTs stalled!")
+            return
+        print(f"  UT{ut.uid} -> KT0 : {ut.task}")
+
+
+def one_to_one(uts: list[UserThread]) -> None:
+    """Each UT gets its own KT. One block doesn't affect others."""
+    print("\n=== One-to-One ===")
+    kts = [KernelThread(i) for i in range(len(uts))]
+    for i, ut in enumerate(uts):
+        ut.mapped_kt = i
+        if ut.blocks:
+            print(f"  UT{ut.uid} -> KT{i} blocked  (others unaffected)")
+        else:
+            print(f"  UT{ut.uid} -> KT{i} running : {ut.task}")
+
+
+def many_to_many(uts: list[UserThread], num_kts: int) -> None:
+    """M user threads multiplexed onto N kernel threads (M > N).
+    When a UT blocks, its KT is reassigned to another UT.
+    Time: O(n), Space: O(n + num_kts)
+    """
+    print(f"\n=== Many-to-Many ({len(uts)} UTs on {num_kts} KTs) ===")
+    free_kts: deque[int] = deque(range(num_kts))  # available kernel threads
+
+    for ut in uts:
+        if not free_kts:
+            print(f"  UT{ut.uid} waiting (all {num_kts} KTs busy)...")
+            free_kts.append(0)  # simulate one completing
+
+        kt_id = free_kts.popleft()
+
+        if ut.blocks:
+            # Runtime detects block, reschedules this KT to next ready UT
+            print(f"  UT{ut.uid} -> KT{kt_id} blocked -> runtime recycles KT{kt_id}")
+            free_kts.appendleft(kt_id)  # KT freed immediately
+        else:
+            print(f"  UT{ut.uid} -> KT{kt_id} running : {ut.task}")
+            # KT stays busy until UT finishes; simplified: free it after
+
+
+if __name__ == "__main__":
+    threads = [
+        UserThread(1, "handle request A"),
+        UserThread(2, "read from disk",   blocks=True),
+        UserThread(3, "compute hash"),
+        UserThread(4, "render frame"),
+    ]
+
+    many_to_one(threads)
+    one_to_one(threads)
+    many_to_many(threads, num_kts=2)   # 4 UTs on only 2 KTs
+```
+
+---
+
 ## 8. Key Takeaways
 
 - **User-level threads:** Managed by library in user space — kernel blind to them. Fast creation and switching, but can't use multiple cores and one blocking call freezes all threads

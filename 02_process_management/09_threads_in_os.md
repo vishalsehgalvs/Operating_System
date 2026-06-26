@@ -329,6 +329,208 @@ wait_for(thread1, thread2, thread3)  // wait for the slowest one
 
 ---
 
+## 12. Code Examples
+
+> Working code that demonstrates threads — creation, shared memory, and differences from processes — in practice.
+
+### C++ — Simple Version
+Create three threads, each doing independent work, then join them back to main.
+
+```cpp
+#include <iostream>
+#include <thread>
+#include <vector>
+using namespace std;
+
+// Each thread runs this function independently and concurrently
+void threadTask(int id, int workUnits) {
+    cout << "Thread " << id << " started, processing " << workUnits << " units\n";
+    // Simulate work (in a real program this could be file I/O, computation, etc.)
+    long long sum = 0;
+    for (int i = 0; i < workUnits * 1000; i++) sum += i;
+    cout << "Thread " << id << " finished (sum=" << sum << ")\n";
+}
+
+int main() {
+    cout << "Main thread started (TID: shared process memory)\n\n";
+
+    // Create 3 threads — they all share the process's heap/globals
+    // Each thread gets its own stack and program counter
+    vector<thread> threads;
+    threads.emplace_back(threadTask, 1, 5);  // thread 1
+    threads.emplace_back(threadTask, 2, 3);  // thread 2
+    threads.emplace_back(threadTask, 3, 7);  // thread 3
+    // Notice: output may interleave — threads run concurrently!
+
+    // Wait for all threads to finish before main exits
+    for (auto& t : threads) t.join();
+
+    cout << "\nMain thread: all worker threads done\n";
+    return 0;
+}
+// Compile: g++ -std=c++17 -pthread threads_simple.cpp -o threads_simple
+```
+
+### C++ — Medium / LeetCode Style
+Multiple threads increment a shared counter — first show the race condition, then fix it with a mutex.
+
+```cpp
+#include <iostream>
+#include <thread>
+#include <mutex>
+#include <vector>
+using namespace std;
+
+// Shared counter — all threads access this
+int sharedCounter = 0;
+mutex counterMutex;   // protects sharedCounter
+
+// WITHOUT protection: multiple threads race to read-modify-write
+// This is a DATA RACE — undefined behavior in C++
+void incrementUnsafe(int n) {
+    for (int i = 0; i < n; i++)
+        sharedCounter++;  // NOT atomic: read, add, write = 3 separate ops
+}
+
+// WITH mutex: only one thread in the critical section at a time
+void incrementSafe(int n) {
+    for (int i = 0; i < n; i++) {
+        lock_guard<mutex> lock(counterMutex);  // auto-unlocks at scope end
+        sharedCounter++;  // now safe — only one thread here at a time
+    }
+}
+
+// Runs a benchmark: N threads each incrementing M times
+// Returns final counter value
+// Time: O(N*M), Space: O(N)
+int runBenchmark(bool safe, int numThreads, int incPerThread) {
+    sharedCounter = 0;
+    vector<thread> threads;
+
+    auto fn = safe ? incrementSafe : incrementUnsafe;
+    for (int i = 0; i < numThreads; i++)
+        threads.emplace_back(fn, incPerThread);
+
+    for (auto& t : threads) t.join();
+    return sharedCounter;
+}
+
+int main() {
+    const int THREADS = 5, INC = 10000;
+    int expected = THREADS * INC;
+
+    int unsafe = runBenchmark(false, THREADS, INC);
+    int safe   = runBenchmark(true,  THREADS, INC);
+
+    cout << "Expected      : " << expected << "\n";
+    cout << "Without mutex : " << unsafe
+         << (unsafe != expected ? " (RACE CONDITION!)" : "") << "\n";
+    cout << "With mutex    : " << safe
+         << (safe == expected ? " (correct)" : " (still wrong?!)") << "\n";
+    return 0;
+}
+// Compile: g++ -std=c++17 -pthread threads_mutex.cpp -o threads_mutex
+```
+
+### Python — Simple Version
+Create multiple threads with `threading.Thread`, each doing independent work.
+
+```python
+# Threads in Python — creating and joining threads
+import threading
+import time
+
+def thread_task(thread_id: int, work_units: int) -> None:
+    """Each thread runs this function independently."""
+    print(f"Thread {thread_id} started ({work_units} work units)")
+
+    # Simulate work (file I/O, computation, network call, etc.)
+    total = sum(range(work_units * 1000))
+
+    print(f"Thread {thread_id} finished (result={total})")
+
+
+# Main thread
+print("Main thread started\n")
+
+# Create three threads — they all share the process's memory
+# Each gets its own call stack and execution pointer
+threads = [
+    threading.Thread(target=thread_task, args=(1, 5)),
+    threading.Thread(target=thread_task, args=(2, 3)),
+    threading.Thread(target=thread_task, args=(3, 7)),
+]
+
+# Start all threads
+for t in threads:
+    t.start()
+
+# Wait for all threads to complete
+for t in threads:
+    t.join()
+
+print("\nMain thread: all workers done")
+```
+
+### Python — Medium Level
+Shared counter with a race condition, then fixed with `threading.Lock` — shows why synchronization matters.
+
+```python
+import threading
+from typing import Callable
+
+# Shared state — all threads see this
+shared_counter = 0
+lock = threading.Lock()   # mutex for critical section
+
+
+def increment_unsafe(n: int) -> None:
+    """NO protection — race condition possible."""
+    global shared_counter
+    for _ in range(n):
+        # This is 3 operations: READ counter, ADD 1, WRITE back
+        # Another thread can interrupt between any of these!
+        shared_counter += 1
+
+
+def increment_safe(n: int) -> None:
+    """WITH lock — only one thread in critical section at a time."""
+    global shared_counter
+    for _ in range(n):
+        with lock:           # acquire lock, auto-release on exit
+            shared_counter += 1  # critical section: atomically protected
+
+
+def run_benchmark(fn: Callable, num_threads: int, inc_per_thread: int) -> int:
+    """Launch N threads each calling fn(inc_per_thread), return final counter.
+    Time: O(N * inc_per_thread), Space: O(N)
+    """
+    global shared_counter
+    shared_counter = 0
+
+    threads = [threading.Thread(target=fn, args=(inc_per_thread,))
+               for _ in range(num_threads)]
+    for t in threads: t.start()
+    for t in threads: t.join()
+    return shared_counter
+
+
+NUM_THREADS = 5
+INC_EACH    = 10_000
+EXPECTED    = NUM_THREADS * INC_EACH
+
+unsafe_result = run_benchmark(increment_unsafe, NUM_THREADS, INC_EACH)
+safe_result   = run_benchmark(increment_safe,   NUM_THREADS, INC_EACH)
+
+print(f"Expected       : {EXPECTED}")
+print(f"Without lock   : {unsafe_result}"
+      f"  {'<-- RACE CONDITION!' if unsafe_result != EXPECTED else '(got lucky)'}")
+print(f"With lock      : {safe_result}"
+      f"  {'(correct)' if safe_result == EXPECTED else '(still wrong?!)'}")
+```
+
+---
+
 ## 13. Key Takeaways
 
 - A **thread** is the smallest unit of execution — lives inside a process, shares its memory

@@ -333,6 +333,387 @@ Real OS implementations are more complex — they include priority ordering, syn
 
 ---
 
+## 13. Code Examples
+
+> Working code that demonstrates job queue → ready queue → CPU → I/O queue → ready queue flow in practice.
+
+### C++ — Simple Version
+Three-queue model — processes flow from Job Queue through Ready Queue, run on CPU, then wait in I/O Queue.
+
+```cpp
+#include <iostream>
+#include <queue>
+#include <string>
+#include <vector>
+using namespace std;
+
+struct Process {
+    int    pid;
+    string name;
+    int    burst;      // CPU work remaining
+    bool   needsIO;    // will it request I/O before finishing?
+    string state;
+};
+
+int main() {
+    // --- JOB QUEUE: processes waiting to be loaded into memory ---
+    queue<Process> jobQueue;
+    jobQueue.push({1, "Chrome",   5, true,  "NEW"});
+    jobQueue.push({2, "VSCode",   3, false, "NEW"});
+    jobQueue.push({3, "Terminal", 4, true,  "NEW"});
+
+    cout << "=== Job Queue -> Ready Queue (Long-Term Scheduler) ===\n";
+    queue<Process> readyQueue;  // processes in memory waiting for CPU
+    while (!jobQueue.empty()) {
+        Process p = jobQueue.front(); jobQueue.pop();
+        p.state = "READY";
+        readyQueue.push(p);
+        cout << "Loaded PID " << p.pid << " ('" << p.name << "') into memory -> READY\n";
+    }
+
+    queue<Process> ioWaitQueue; // processes blocked on I/O
+    int clock = 0;
+    const int TIME_QUANTUM = 2;
+
+    cout << "\n=== Ready Queue -> CPU -> I/O (Short-Term Scheduler) ===\n";
+
+    while (!readyQueue.empty() || !ioWaitQueue.empty()) {
+        // --- CPU: dispatch next ready process ---
+        if (!readyQueue.empty()) {
+            Process p = readyQueue.front(); readyQueue.pop();
+            p.state = "RUNNING";
+            int runFor = min(TIME_QUANTUM, p.burst);
+            cout << "t=" << clock << "  PID " << p.pid
+                 << " RUNNING (" << runFor << " units)\n";
+            clock   += runFor;
+            p.burst -= runFor;
+
+            if (p.burst == 0) {
+                p.state = "TERMINATED";
+                cout << "t=" << clock << "  PID " << p.pid << " TERMINATED\n";
+            } else if (p.needsIO) {
+                // Needs I/O before it can continue
+                p.state = "WAITING";
+                p.needsIO = false;  // won't request I/O again
+                ioWaitQueue.push(p);
+                cout << "t=" << clock << "  PID " << p.pid
+                     << " -> I/O WAIT queue\n";
+            } else {
+                // Time quantum expired, preempted back to ready
+                p.state = "READY";
+                readyQueue.push(p);
+            }
+        }
+
+        // --- I/O completion: move one waiting process back to ready ---
+        if (!ioWaitQueue.empty()) {
+            Process p = ioWaitQueue.front(); ioWaitQueue.pop();
+            p.state = "READY";
+            readyQueue.push(p);
+            cout << "t=" << clock << "  PID " << p.pid
+                 << " I/O done -> READY queue\n";
+        }
+    }
+
+    cout << "\nAll processes done at t=" << clock << "\n";
+    return 0;
+}
+// Compile: g++ -std=c++17 queues.cpp -o queues
+```
+
+### C++ — Medium / LeetCode Style
+Full scheduler with all three scheduler roles (long-term, short-term, medium-term swap).
+
+```cpp
+#include <iostream>
+#include <queue>
+#include <vector>
+#include <string>
+#include <algorithm>
+using namespace std;
+
+// Scheduler with three queues + medium-term swapping
+// Time: O(total_burst), Space: O(n)
+
+struct Process {
+    int    pid;
+    string name;
+    int    burst;
+    int    remaining;
+    bool   needsIO;
+    string state;
+    int    arrivalTime;
+    int    finishTime = 0;
+
+    Process(int id, string n, int b, bool io, int at = 0)
+        : pid(id), name(n), burst(b), remaining(b),
+          needsIO(io), state("NEW"), arrivalTime(at) {}
+};
+
+class Scheduler {
+    queue<Process*> jobQueue;    // NEW: waiting to be admitted
+    queue<Process*> readyQueue;  // READY: waiting for CPU
+    queue<Process*> ioQueue;     // WAITING: blocked on I/O
+    vector<Process*> suspended;  // swapped to disk (medium-term)
+    int clock = 0;
+    const int QUANTUM     = 2;
+    const int MEMORY_LIMIT = 2;  // max processes in memory at once
+    int inMemory = 0;
+
+public:
+    void admit(Process* p) {
+        // Long-term scheduler: let in if memory available, else suspend
+        if (inMemory < MEMORY_LIMIT) {
+            p->state = "READY";
+            readyQueue.push(p);
+            inMemory++;
+            cout << "[LT] PID " << p->pid << " admitted to memory -> READY\n";
+        } else {
+            p->state = "SUSPENDED";
+            suspended.push_back(p);
+            cout << "[LT] PID " << p->pid
+                 << " swapped to disk (memory full) -> SUSPENDED\n";
+        }
+    }
+
+    void runOneCycle() {
+        // Short-term: dispatch next ready process
+        if (!readyQueue.empty()) {
+            Process* p = readyQueue.front(); readyQueue.pop();
+            p->state = "RUNNING";
+            int runFor = min(QUANTUM, p->remaining);
+            cout << "t=" << clock << "  PID " << p->pid
+                 << " RUNNING (" << runFor << " units)\n";
+            clock        += runFor;
+            p->remaining -= runFor;
+
+            if (p->remaining == 0) {
+                p->state     = "TERMINATED";
+                p->finishTime = clock;
+                inMemory--;
+                cout << "t=" << clock << "  PID " << p->pid << " TERMINATED\n";
+                // Medium-term: swap in a suspended process
+                if (!suspended.empty()) {
+                    Process* s = suspended.back(); suspended.pop_back();
+                    admit(s);
+                }
+            } else if (p->needsIO) {
+                p->state = "WAITING"; p->needsIO = false;
+                ioQueue.push(p);
+            } else {
+                p->state = "READY";
+                readyQueue.push(p);
+            }
+        }
+        // Simulate I/O completion
+        if (!ioQueue.empty()) {
+            Process* p = ioQueue.front(); ioQueue.pop();
+            p->state = "READY";
+            readyQueue.push(p);
+            cout << "t=" << clock << "  PID " << p->pid << " I/O done -> READY\n";
+        }
+    }
+
+    bool hasWork() {
+        return !readyQueue.empty() || !ioQueue.empty();
+    }
+};
+
+int main() {
+    vector<Process> procs = {
+        {1, "Chrome",   5, true},
+        {2, "VSCode",   3, false},
+        {3, "Terminal", 4, true},
+        {4, "Slack",    2, false},
+    };
+
+    Scheduler sched;
+    cout << "=== Admitting processes (Long-Term Scheduler) ===\n";
+    for (auto& p : procs) sched.admit(&p);
+
+    cout << "\n=== Running (Short + Medium Term) ===\n";
+    while (sched.hasWork()) sched.runOneCycle();
+
+    cout << "\nAll done.\n";
+    return 0;
+}
+// Compile: g++ -std=c++17 full_scheduler.cpp -o full_scheduler
+```
+
+### Python — Simple Version
+Process lifecycle through job queue → ready queue → CPU → I/O queue → ready queue.
+
+```python
+# Scheduling queues simulation
+from collections import deque
+
+class Process:
+    def __init__(self, pid, name, burst, needs_io=False):
+        self.pid      = pid
+        self.name     = name
+        self.burst    = burst
+        self.needs_io = needs_io
+        self.state    = "NEW"
+
+
+# Three queues matching OS theory
+job_queue  = deque([   # Long-term: waiting to enter memory
+    Process(1, "Chrome",   5, needs_io=True),
+    Process(2, "VSCode",   3, needs_io=False),
+    Process(3, "Terminal", 4, needs_io=True),
+])
+ready_queue = deque()  # Short-term: in memory, waiting for CPU
+io_queue    = deque()  # Device queue: blocked on I/O
+
+# --- Long-Term Scheduler: admit all from job queue ---
+print("=== Long-Term Scheduler: Job Queue -> Ready Queue ===")
+while job_queue:
+    p = job_queue.popleft()
+    p.state = "READY"
+    ready_queue.append(p)
+    print(f"  PID {p.pid} ({p.name}) admitted -> READY")
+
+TIME_QUANTUM = 2
+clock = 0
+
+# --- Short-Term Scheduler: dispatch from ready queue ---
+print("\n=== Short-Term Scheduler ===")
+while ready_queue or io_queue:
+    if ready_queue:
+        p = ready_queue.popleft()
+        p.state  = "RUNNING"
+        run_for  = min(TIME_QUANTUM, p.burst)
+        print(f"t={clock:>3}  PID {p.pid} RUNNING ({run_for} units)")
+        clock    += run_for
+        p.burst  -= run_for
+
+        if p.burst == 0:
+            p.state = "TERMINATED"
+            print(f"t={clock:>3}  PID {p.pid} TERMINATED")
+        elif p.needs_io:
+            p.state    = "WAITING"
+            p.needs_io = False
+            io_queue.append(p)
+            print(f"t={clock:>3}  PID {p.pid} -> I/O WAIT")
+        else:
+            p.state = "READY"
+            ready_queue.append(p)
+
+    # Simulate I/O completing
+    if io_queue:
+        p = io_queue.popleft()
+        p.state = "READY"
+        ready_queue.append(p)
+        print(f"t={clock:>3}  PID {p.pid} I/O done -> READY")
+
+print(f"\nAll done at t={clock}")
+```
+
+### Python — Medium Level
+Scheduler with all three tiers — long-term admission, short-term dispatch, medium-term swap — plus per-process stats.
+
+```python
+from collections import deque
+from dataclasses import dataclass, field
+
+@dataclass
+class Process:
+    pid:       int
+    name:      str
+    burst:     int
+    needs_io:  bool = False
+    state:     str  = "NEW"
+    remaining: int  = field(init=False)
+    finish_t:  int  = 0
+    wait_t:    int  = 0
+
+    def __post_init__(self):
+        self.remaining = self.burst
+
+
+class SchedulerSim:
+    """Three-level scheduler simulation.
+    Time: O(total_burst), Space: O(n)
+    """
+    MEMORY_LIMIT = 2  # max concurrent processes in memory
+
+    def __init__(self):
+        self.ready    : deque[Process] = deque()
+        self.io_wait  : deque[Process] = deque()
+        self.suspended: list[Process]  = []
+        self.in_memory = 0
+        self.clock     = 0
+
+    def admit(self, p: Process) -> None:
+        """Long-term: load into memory, or suspend to disk if full."""
+        if self.in_memory < self.MEMORY_LIMIT:
+            p.state = "READY"
+            self.ready.append(p)
+            self.in_memory += 1
+            print(f"[LT] PID {p.pid} ({p.name}) -> READY (in memory)")
+        else:
+            p.state = "SUSPENDED"
+            self.suspended.append(p)
+            print(f"[LT] PID {p.pid} ({p.name}) -> SUSPENDED (disk)")
+
+    def step(self, quantum: int = 2) -> None:
+        """Short-term: dispatch, run one quantum, handle I/O."""
+        if not self.ready:
+            return
+
+        p = self.ready.popleft()
+        p.state   = "RUNNING"
+        run_for   = min(quantum, p.remaining)
+        print(f"t={self.clock:>3}  PID {p.pid} RUNNING ({run_for} units)")
+        self.clock    += run_for
+        p.remaining   -= run_for
+
+        if p.remaining == 0:
+            p.state   = "TERMINATED"
+            p.finish_t = self.clock
+            self.in_memory -= 1
+            print(f"t={self.clock:>3}  PID {p.pid} TERMINATED  TAT={p.finish_t}")
+            # Medium-term: swap in a suspended process
+            if self.suspended:
+                self.admit(self.suspended.pop())
+        elif p.needs_io:
+            p.state = "WAITING"; p.needs_io = False
+            self.io_wait.append(p)
+        else:
+            p.state = "READY"
+            self.ready.append(p)
+
+        # Simulate I/O completion
+        if self.io_wait:
+            done = self.io_wait.popleft()
+            done.state = "READY"
+            self.ready.append(done)
+            print(f"t={self.clock:>3}  PID {done.pid} I/O done -> READY")
+
+    def has_work(self) -> bool:
+        return bool(self.ready or self.io_wait)
+
+
+if __name__ == "__main__":
+    jobs = [
+        Process(1, "Chrome",   5, needs_io=True),
+        Process(2, "VSCode",   3, needs_io=False),
+        Process(3, "Terminal", 4, needs_io=True),
+        Process(4, "Slack",    2, needs_io=False),
+    ]
+
+    sim = SchedulerSim()
+    print("=== Admitting processes ===")
+    for j in jobs:
+        sim.admit(j)
+
+    print("\n=== Running ===")
+    while sim.has_work():
+        sim.step(quantum=2)
+```
+
+---
+
 ## 14. Key Takeaways
 
 - **Three queues:** Job queue (all processes), ready queue (waiting for CPU), device queues (waiting for I/O)

@@ -310,6 +310,265 @@ When a user program makes a system call, **the kernel runs code on behalf of tha
 
 ---
 
+## 11. Code Examples
+
+> Working code that demonstrates user mode vs kernel mode switching in practice.
+
+### C++ — Simple Version
+Simulate a privilege flag, a user-mode app making a syscall, and the kernel handler taking over.
+
+```cpp
+#include <iostream>
+#include <string>
+using namespace std;
+
+// Simulate the CPU privilege level
+enum Mode { USER_MODE, KERNEL_MODE };
+
+// Global simulated CPU mode flag
+Mode currentMode = USER_MODE;
+
+string modeName(Mode m) {
+    return (m == USER_MODE) ? "USER_MODE" : "KERNEL_MODE";
+}
+
+// Simulate the kernel handling a syscall
+// In a real CPU this code runs with ring-0 privileges
+void kernelHandler(const string& syscallName) {
+    currentMode = KERNEL_MODE;  // --- mode switch: USER -> KERNEL ---
+    cout << "  [KERNEL] Mode = " << modeName(currentMode) << "\n";
+    cout << "  [KERNEL] Handling syscall: '" << syscallName << "'\n";
+
+    // Perform privileged work (read file, allocate memory, etc.)
+    if (syscallName == "read")  cout << "  [KERNEL] Reading 512 bytes from disk...\n";
+    if (syscallName == "write") cout << "  [KERNEL] Writing to stdout...\n";
+    if (syscallName == "exit")  cout << "  [KERNEL] Freeing resources...\n";
+
+    currentMode = USER_MODE;    // --- mode switch: KERNEL -> USER ---
+    cout << "  [KERNEL] Done. Returning to user. Mode = "
+         << modeName(currentMode) << "\n";
+}
+
+// Simulate a user-mode application making a system call
+void userApp() {
+    cout << "[USER] Running. Mode = " << modeName(currentMode) << "\n";
+    cout << "[USER] Needs to read a file -> issuing syscall 'read'\n";
+
+    // User-mode app CANNOT do the I/O itself.
+    // It calls a library function (e.g. read()) which issues an INT 0x80 / SYSCALL.
+    kernelHandler("read");    // mode switch happens here
+
+    cout << "[USER] Back in user mode. Mode = " << modeName(currentMode) << "\n";
+    cout << "[USER] Needs to print -> issuing syscall 'write'\n";
+    kernelHandler("write");
+
+    cout << "[USER] Finishing -> syscall 'exit'\n";
+    kernelHandler("exit");
+    cout << "[USER] Process exited.\n";
+}
+
+int main() {
+    cout << "=== User Mode / Kernel Mode Demo ===\n\n";
+    userApp();
+    return 0;
+}
+// Compile: g++ -std=c++17 mode_switch.cpp -o mode_switch
+```
+
+### C++ — Medium / LeetCode Style
+Syscall dispatcher with multiple syscall types, privilege validation, and mode-switch logging.
+
+```cpp
+#include <iostream>
+#include <unordered_map>
+#include <functional>
+#include <string>
+#include <stdexcept>
+using namespace std;
+
+// Privilege levels (simulates CPU rings)
+enum Mode { USER = 0, KERNEL = 1 };
+
+Mode cpuMode = USER;  // CPU starts in user mode
+
+// Syscall table: maps syscall number -> (name, handler)
+// In Linux: read=0, write=1, open=2, close=3, exit=60
+struct Syscall {
+    string name;
+    function<void()> handler;
+};
+
+unordered_map<int, Syscall> syscallTable = {
+    {0, {"read",  []{ cout << "    [kernel:read]  Reading from file descriptor...\n"; }}},
+    {1, {"write", []{ cout << "    [kernel:write] Writing to stdout...\n"; }}},
+    {2, {"open",  []{ cout << "    [kernel:open]  Opening file, returning fd...\n"; }}},
+    {60,{"exit",  []{ cout << "    [kernel:exit]  Cleaning up process resources...\n"; }}},
+};
+
+// Called when user code executes SYSCALL / INT 0x80 instruction
+// Simulates the entire mode switch + kernel handling + return
+// Time: O(1) per syscall dispatch
+void issueSyscall(int syscallNum) {
+    if (cpuMode != USER)
+        throw logic_error("Syscall issued from kernel mode — not expected");
+
+    if (!syscallTable.count(syscallNum))
+        throw invalid_argument("Unknown syscall: " + to_string(syscallNum));
+
+    const auto& sc = syscallTable[syscallNum];
+
+    cout << "  -> Syscall " << syscallNum << " ('" << sc.name << "') issued\n";
+
+    // --- TRAP: USER -> KERNEL ---
+    cpuMode = KERNEL;
+    cout << "  -> Mode switch: USER -> KERNEL\n";
+
+    sc.handler();  // privileged kernel work done here
+
+    // --- IRET: KERNEL -> USER ---
+    cpuMode = USER;
+    cout << "  -> Mode switch: KERNEL -> USER (returned from syscall)\n";
+}
+
+int main() {
+    cout << "=== Syscall Dispatcher Demo ===\n";
+    cout << "CPU mode: USER\n\n";
+
+    cout << "[user app] Opening a file:\n";
+    issueSyscall(2);  // open
+
+    cout << "\n[user app] Reading the file:\n";
+    issueSyscall(0);  // read
+
+    cout << "\n[user app] Printing result:\n";
+    issueSyscall(1);  // write
+
+    cout << "\n[user app] Exiting:\n";
+    issueSyscall(60); // exit
+
+    return 0;
+}
+// Compile: g++ -std=c++17 syscall_dispatcher.cpp -o syscall_dispatcher
+```
+
+### Python — Simple Version
+Mode flag simulation — user code requests a syscall, kernel handler runs with elevated privileges.
+
+```python
+# User mode / kernel mode simulation
+
+cpu_mode = "USER"   # global CPU mode flag
+
+
+def kernel_handler(syscall_name: str) -> None:
+    """Runs in KERNEL mode — user code cannot call privileged ops directly."""
+    global cpu_mode
+
+    # --- Mode switch: USER -> KERNEL ---
+    cpu_mode = "KERNEL"
+    print(f"  [KERNEL] Mode = {cpu_mode}")
+    print(f"  [KERNEL] Handling: '{syscall_name}'")
+
+    # Privileged work
+    if syscall_name == "read":  print("  [KERNEL] Reading 512 bytes from disk...")
+    if syscall_name == "write": print("  [KERNEL] Writing to stdout...")
+    if syscall_name == "exit":  print("  [KERNEL] Freeing resources...")
+
+    # --- Mode switch: KERNEL -> USER ---
+    cpu_mode = "USER"
+    print(f"  [KERNEL] Returning to user. Mode = {cpu_mode}")
+
+
+def user_app() -> None:
+    """Runs in USER mode — cannot touch hardware directly."""
+    print(f"[USER] Running. Mode = {cpu_mode}")
+
+    print("[USER] Reading a file -> syscall 'read'")
+    kernel_handler("read")
+
+    print(f"\n[USER] Back in user mode = {cpu_mode}")
+    print("[USER] Writing output -> syscall 'write'")
+    kernel_handler("write")
+
+    print("\n[USER] Exiting -> syscall 'exit'")
+    kernel_handler("exit")
+
+
+user_app()
+```
+
+### Python — Medium Level
+Decorator-based syscall table — any function marked `@kernel_only` runs in kernel mode automatically.
+
+```python
+import functools
+
+# Global CPU privilege state
+_cpu_mode = "USER"
+
+
+def kernel_only(fn):
+    """Decorator: wraps a function so it always runs in KERNEL mode.
+    Triggers mode switch before, reverts after — just like a real syscall.
+    """
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        global _cpu_mode
+        if _cpu_mode != "USER":
+            raise PermissionError("Nested kernel call not allowed")
+
+        print(f"  [trap]  {fn.__name__}: USER -> KERNEL")
+        _cpu_mode = "KERNEL"
+        try:
+            result = fn(*args, **kwargs)          # privileged work
+        finally:
+            _cpu_mode = "USER"                    # always restore
+            print(f"  [iret]  {fn.__name__}: KERNEL -> USER")
+        return result
+    return wrapper
+
+
+# --- Syscall implementations (run in kernel mode) ---
+
+@kernel_only
+def sys_read(fd: int, n_bytes: int) -> bytes:
+    print(f"  [kernel:read]  fd={fd}, reading {n_bytes} bytes from disk")
+    return b"hello world"  # simulated data
+
+
+@kernel_only
+def sys_write(fd: int, data: bytes) -> int:
+    print(f"  [kernel:write] fd={fd}, writing {len(data)} bytes")
+    return len(data)
+
+
+@kernel_only
+def sys_exit(code: int) -> None:
+    print(f"  [kernel:exit]  exit code={code}, releasing resources")
+
+
+# --- User application ---
+
+def user_app() -> None:
+    print(f"[user] Running. mode={_cpu_mode}\n")
+
+    print("[user] Opening and reading file:")
+    data = sys_read(3, 512)
+    print(f"[user] Got {len(data)} bytes. mode={_cpu_mode}\n")
+
+    print("[user] Writing to stdout:")
+    sys_write(1, data)
+    print(f"[user] Done. mode={_cpu_mode}\n")
+
+    print("[user] Exiting:")
+    sys_exit(0)
+
+
+user_app()
+```
+
+---
+
 ## 12. Key Takeaways
 
 - **Two privilege levels:** User Mode (restricted) and Kernel Mode (unrestricted) — enforced by the CPU at hardware level

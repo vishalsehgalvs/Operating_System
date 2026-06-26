@@ -324,6 +324,325 @@ Both SJF and SRTF can **starve long processes** — if short processes keep arri
 
 ---
 
+## 8. Code Examples
+
+> Working code that demonstrates FCFS, SJF, and SRTF scheduling algorithms with waiting time and turnaround time calculations in practice.
+
+### C++ — Simple Version
+FCFS scheduler — processes run in arrival order, calculate waiting and turnaround times.
+
+```cpp
+#include <iostream>
+#include <vector>
+#include <algorithm>
+using namespace std;
+
+struct Process {
+    int pid, arrival, burst;
+    int waitTime = 0, turnaround = 0, finishTime = 0;
+};
+
+// FCFS: sort by arrival time, run each process to completion
+void fcfs(vector<Process>& procs) {
+    sort(procs.begin(), procs.end(),
+         [](const Process& a, const Process& b){ return a.arrival < b.arrival; });
+
+    int clock = 0;
+    cout << "--- FCFS Scheduling ---\n";
+    cout << "PID\tArrival\tBurst\tWait\tTAT\tFinish\n";
+
+    for (auto& p : procs) {
+        // Jump clock forward if CPU was idle before this process arrived
+        clock      = max(clock, p.arrival);
+        p.waitTime  = clock - p.arrival;    // time spent waiting in queue
+        clock      += p.burst;              // run to completion
+        p.finishTime = clock;
+        p.turnaround = p.finishTime - p.arrival;  // TAT = Finish - Arrival
+
+        cout << p.pid << "\t" << p.arrival << "\t" << p.burst << "\t"
+             << p.waitTime << "\t" << p.turnaround << "\t" << p.finishTime << "\n";
+    }
+
+    double avgW = 0, avgT = 0;
+    for (auto& p : procs) { avgW += p.waitTime; avgT += p.turnaround; }
+    int n = procs.size();
+    cout << "Avg Waiting: " << avgW/n << "  Avg TAT: " << avgT/n << "\n";
+}
+
+int main() {
+    vector<Process> procs = {
+        {1, 0, 8},  // P1 arrives at 0, burst=8
+        {2, 1, 4},  // P2 arrives at 1, burst=4
+        {3, 2, 2},  // P3 arrives at 2, burst=2
+    };
+    fcfs(procs);
+    return 0;
+}
+// Compile: g++ -std=c++17 fcfs.cpp -o fcfs
+```
+
+### C++ — Medium / LeetCode Style
+All three algorithms (FCFS, SJF, SRTF) on the same job set — compare average waiting time.
+
+```cpp
+#include <iostream>
+#include <vector>
+#include <queue>
+#include <algorithm>
+#include <climits>
+using namespace std;
+
+// CPU Scheduling: FCFS vs SJF vs SRTF
+// Classic interview / LeetCode-style problem
+// Time: FCFS O(n log n), SJF O(n^2), SRTF O(n * max_burst)
+// Space: O(n)
+
+struct Process {
+    int pid, arrival, burst;
+    int remaining, finish = 0, wait = 0;
+    void reset() { remaining = burst; finish = 0; wait = 0; }
+};
+
+double avgWait(vector<Process>& procs) {
+    double s = 0;
+    for (auto& p : procs) s += p.wait;
+    return s / procs.size();
+}
+
+// --- FCFS: First Come First Served (non-preemptive) ---
+void fcfs(vector<Process> procs) {
+    sort(procs.begin(), procs.end(),
+         [](const Process& a, const Process& b){ return a.arrival < b.arrival; });
+    int clock = 0;
+    for (auto& p : procs) {
+        clock   = max(clock, p.arrival);
+        p.wait  = clock - p.arrival;
+        clock  += p.burst;
+        p.finish = clock;
+    }
+    cout << "FCFS   avg wait = " << avgWait(procs) << " ms\n";
+}
+
+// --- SJF: Shortest Job First (non-preemptive) ---
+void sjf(vector<Process> procs) {
+    int n = procs.size(), done = 0, clock = 0;
+    vector<bool> completed(n, false);
+
+    while (done < n) {
+        // Among arrived and not-yet-done, pick shortest burst
+        int sel = -1;
+        for (int i = 0; i < n; i++) {
+            if (!completed[i] && procs[i].arrival <= clock) {
+                if (sel == -1 || procs[i].burst < procs[sel].burst)
+                    sel = i;
+            }
+        }
+        if (sel == -1) { clock++; continue; }  // CPU idle
+
+        Process& p = procs[sel];
+        p.wait  = clock - p.arrival;
+        clock  += p.burst;
+        p.finish    = clock;
+        completed[sel] = true;
+        done++;
+    }
+    cout << "SJF    avg wait = " << avgWait(procs) << " ms\n";
+}
+
+// --- SRTF: Shortest Remaining Time First (preemptive SJF) ---
+void srtf(vector<Process> procs) {
+    int n = procs.size(), done = 0, clock = 0;
+    vector<int> startTime(n, -1);
+
+    while (done < n) {
+        // Pick arrived process with shortest remaining time
+        int sel = -1;
+        for (int i = 0; i < n; i++) {
+            if (procs[i].remaining > 0 && procs[i].arrival <= clock) {
+                if (sel == -1 || procs[i].remaining < procs[sel].remaining)
+                    sel = i;
+            }
+        }
+        if (sel == -1) { clock++; continue; }  // CPU idle
+
+        if (startTime[sel] == -1) startTime[sel] = clock;
+        procs[sel].remaining--;
+        clock++;
+
+        if (procs[sel].remaining == 0) {
+            procs[sel].finish = clock;
+            // wait = finish - arrival - burst
+            procs[sel].wait = procs[sel].finish - procs[sel].arrival - procs[sel].burst;
+            done++;
+        }
+    }
+    cout << "SRTF   avg wait = " << avgWait(procs) << " ms\n";
+}
+
+int main() {
+    vector<Process> base = {
+        {1, 0, 8, 8},
+        {2, 1, 4, 4},
+        {3, 2, 2, 2},
+        {4, 3, 5, 5},
+    };
+
+    cout << "=== CPU Scheduling Comparison ===\n";
+    fcfs(base);
+    sjf(base);
+    srtf(base);
+    cout << "(Lower avg wait = better)\n";
+    return 0;
+}
+// Compile: g++ -std=c++17 scheduling.cpp -o scheduling
+```
+
+### Python — Simple Version
+FCFS — sort by arrival, run to completion, print waiting time and turnaround time table.
+
+```python
+# FCFS Scheduler with waiting time and turnaround time
+
+class Process:
+    def __init__(self, pid, arrival, burst):
+        self.pid     = pid
+        self.arrival = arrival
+        self.burst   = burst
+        self.wait    = 0
+        self.tat     = 0   # turnaround time
+
+
+def fcfs(processes: list[Process]) -> None:
+    procs = sorted(processes, key=lambda p: p.arrival)
+    clock = 0
+
+    print(f"{'PID':>4} {'Arrival':>8} {'Burst':>6} {'Wait':>5} {'TAT':>5} {'Finish':>7}")
+    for p in procs:
+        clock  = max(clock, p.arrival)  # skip idle time
+        p.wait = clock - p.arrival      # time in ready queue
+        clock += p.burst                # run to completion
+        p.tat  = p.wait + p.burst
+        print(f"{p.pid:>4} {p.arrival:>8} {p.burst:>6} {p.wait:>5} {p.tat:>5} {clock:>7}")
+
+    avg_w = sum(p.wait for p in procs) / len(procs)
+    avg_t = sum(p.tat  for p in procs) / len(procs)
+    print(f"\nAvg Wait = {avg_w:.2f}  Avg TAT = {avg_t:.2f}")
+
+
+procs = [
+    Process(1, 0, 8),
+    Process(2, 1, 4),
+    Process(3, 2, 2),
+]
+fcfs(procs)
+```
+
+### Python — Medium Level
+All three algorithms (FCFS, SJF, SRTF) with a comparison table — classic interview problem.
+
+```python
+from copy import deepcopy
+from dataclasses import dataclass, field
+
+@dataclass
+class Process:
+    pid:     int
+    arrival: int
+    burst:   int
+    remaining: int = field(init=False)
+    wait:    int = 0
+    finish:  int = 0
+
+    def __post_init__(self):
+        self.remaining = self.burst
+
+    def reset(self):
+        self.remaining = self.burst
+        self.wait = 0
+        self.finish = 0
+
+
+def avg_wait(procs: list[Process]) -> float:
+    return sum(p.wait for p in procs) / len(procs)
+
+
+def fcfs(procs: list[Process]) -> float:
+    """Non-preemptive. O(n log n) sort + O(n) scan."""
+    jobs = sorted(procs, key=lambda p: p.arrival)
+    clock = 0
+    for p in jobs:
+        clock   = max(clock, p.arrival)
+        p.wait  = clock - p.arrival
+        clock  += p.burst
+        p.finish = clock
+    return avg_wait(jobs)
+
+
+def sjf(procs: list[Process]) -> float:
+    """Non-preemptive. At each step pick shortest available burst. O(n^2)."""
+    done, clock, n = 0, 0, len(procs)
+    completed = [False] * n
+    while done < n:
+        # Find arrived, not-done process with shortest burst
+        sel = min(
+            (i for i in range(n)
+             if not completed[i] and procs[i].arrival <= clock),
+            key=lambda i: procs[i].burst,
+            default=None
+        )
+        if sel is None:
+            clock += 1; continue
+        p = procs[sel]
+        p.wait  = clock - p.arrival
+        clock  += p.burst
+        p.finish = clock
+        completed[sel] = True
+        done += 1
+    return avg_wait(procs)
+
+
+def srtf(procs: list[Process]) -> float:
+    """Preemptive SJF. Each tick pick shortest remaining. O(n * max_burst)."""
+    done, clock, n = 0, 0, len(procs)
+    while done < n:
+        sel = min(
+            (p for p in procs if p.remaining > 0 and p.arrival <= clock),
+            key=lambda p: p.remaining,
+            default=None
+        )
+        if sel is None:
+            clock += 1; continue
+        sel.remaining -= 1
+        clock += 1
+        if sel.remaining == 0:
+            sel.finish = clock
+            sel.wait   = sel.finish - sel.arrival - sel.burst
+            done += 1
+    return avg_wait(procs)
+
+
+if __name__ == "__main__":
+    BASE = [
+        Process(1, 0, 8),
+        Process(2, 1, 4),
+        Process(3, 2, 2),
+        Process(4, 3, 5),
+    ]
+    results = []
+    for name, fn in [("FCFS", fcfs), ("SJF", sjf), ("SRTF", srtf)]:
+        procs = deepcopy(BASE)
+        avg   = fn(procs)
+        results.append((name, avg))
+
+    print(f"{'Algorithm':<10} {'Avg Wait (ms)':>14}")
+    print("-" * 26)
+    for name, avg in results:
+        print(f"{name:<10} {avg:>14.2f}")
+    print("(Lower is better)")
+```
+
+---
+
 ## 9. Key Takeaways
 
 - **Scheduling metrics:** Arrival time, Burst time, Completion time, Turnaround time (CT−AT), Waiting time (TAT−BT)

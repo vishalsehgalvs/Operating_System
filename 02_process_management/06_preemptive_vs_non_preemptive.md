@@ -265,6 +265,299 @@ Modern OS designers accept this overhead because user experience requires it.
 
 ---
 
+## 10. Code Examples
+
+> Working code that demonstrates preemptive vs non-preemptive scheduling side by side in practice.
+
+### C++ — Simple Version
+Non-preemptive FCFS — each process runs to completion before the next one starts.
+
+```cpp
+#include <iostream>
+#include <vector>
+#include <numeric>
+using namespace std;
+
+struct Process {
+    int pid;
+    int arrivalTime;  // when the process enters ready queue
+    int burstTime;    // total CPU time needed
+    int waitingTime;  // calculated after scheduling
+    int turnaround;   // waitingTime + burstTime
+};
+
+// Non-preemptive FCFS: first-come first-served, runs to completion
+// Processes must be sorted by arrivalTime before calling this
+void nonPreemptiveFCFS(vector<Process>& procs) {
+    int clock = 0;
+    cout << "--- Non-Preemptive FCFS ---\n";
+    cout << "PID\tArrival\tBurst\tStart\tFinish\tWait\tTAT\n";
+
+    for (auto& p : procs) {
+        // If CPU is idle when this process arrives, jump clock forward
+        if (clock < p.arrivalTime)
+            clock = p.arrivalTime;
+
+        int startTime  = clock;
+        clock         += p.burstTime;   // run to completion
+        p.waitingTime  = startTime - p.arrivalTime;
+        p.turnaround   = p.waitingTime + p.burstTime;
+
+        cout << p.pid << "\t" << p.arrivalTime << "\t"
+             << p.burstTime << "\t" << startTime << "\t"
+             << clock << "\t" << p.waitingTime << "\t"
+             << p.turnaround << "\n";
+    }
+
+    double avgWT  = 0, avgTAT = 0;
+    for (auto& p : procs) { avgWT += p.waitingTime; avgTAT += p.turnaround; }
+    int n = procs.size();
+    cout << "Avg Wait=" << avgWT/n << "  Avg TAT=" << avgTAT/n << "\n";
+}
+
+int main() {
+    vector<Process> procs = {
+        {1, 0, 8},  // arrives at t=0, needs 8ms
+        {2, 1, 4},  // arrives at t=1, needs 4ms
+        {3, 2, 2},  // arrives at t=2, needs 2ms
+    };
+    nonPreemptiveFCFS(procs);
+    return 0;
+}
+// Compile: g++ -std=c++17 non_preemptive.cpp -o non_preemptive
+```
+
+### C++ — Medium / LeetCode Style
+Both schedulers on the same job set — compare average waiting time to see why preemption matters.
+
+```cpp
+#include <iostream>
+#include <vector>
+#include <queue>
+#include <algorithm>
+using namespace std;
+
+// Both schedulers, same input, side-by-side comparison
+// Time: O(n log n) for sort + O(total_burst) for simulation
+
+struct Process {
+    int pid, arrival, burst, remaining;
+    int waitTime = 0, finishTime = 0;
+    void reset() { remaining = burst; waitTime = 0; finishTime = 0; }
+};
+
+// --- Non-Preemptive FCFS ---
+double nonPreemptive(vector<Process> procs) {
+    sort(procs.begin(), procs.end(),
+         [](const Process& a, const Process& b){ return a.arrival < b.arrival; });
+    int clock = 0;
+    for (auto& p : procs) {
+        clock     = max(clock, p.arrival);
+        p.waitTime   = clock - p.arrival;
+        clock    += p.burst;
+        p.finishTime = clock;
+    }
+    double avg = 0;
+    for (auto& p : procs) avg += p.waitTime;
+    return avg / procs.size();
+}
+
+// --- Preemptive Round Robin (quantum=2) ---
+double preemptiveRR(vector<Process> procs, int quantum = 2) {
+    int clock = 0, done = 0;
+    int n = procs.size();
+    queue<int> rq;  // stores indices
+    vector<bool> inQueue(n, false);
+
+    // Admit processes arriving at t=0
+    for (int i = 0; i < n; i++)
+        if (procs[i].arrival == 0) { rq.push(i); inQueue[i] = true; }
+
+    while (done < n) {
+        if (rq.empty()) { clock++; continue; }  // CPU idle
+
+        int idx = rq.front(); rq.pop();
+        Process& p = procs[idx];
+        int runFor = min(quantum, p.remaining);
+        int prevClock = clock;
+        clock        += runFor;
+        p.remaining  -= runFor;
+
+        // Admit new arrivals during this time slice
+        for (int i = 0; i < n; i++)
+            if (!inQueue[i] && procs[i].arrival <= clock) {
+                rq.push(i); inQueue[i] = true;
+            }
+
+        if (p.remaining == 0) {
+            p.finishTime = clock;
+            p.waitTime   = p.finishTime - p.arrival - p.burst;
+            done++;
+        } else {
+            rq.push(idx);
+        }
+    }
+    double avg = 0;
+    for (auto& p : procs) avg += p.waitTime;
+    return avg / n;
+}
+
+int main() {
+    vector<Process> procs = {
+        {1, 0, 8, 8},
+        {2, 1, 4, 4},
+        {3, 2, 2, 2},
+    };
+
+    double npAvg = nonPreemptive(procs);
+    double prAvg = preemptiveRR(procs, 2);
+
+    cout << "Non-Preemptive FCFS avg wait : " << npAvg << " ms\n";
+    cout << "Preemptive Round Robin avg wait: " << prAvg << " ms\n";
+    cout << "Preemption advantage: " << (npAvg - prAvg) << " ms saved\n";
+    return 0;
+}
+// Compile: g++ -std=c++17 preemptive_vs_not.cpp -o preemptive_vs_not
+```
+
+### Python — Simple Version
+Non-preemptive FCFS — run each process to completion, calculate waiting and turnaround times.
+
+```python
+# Non-preemptive FCFS scheduler
+
+class Process:
+    def __init__(self, pid, arrival, burst):
+        self.pid     = pid
+        self.arrival = arrival
+        self.burst   = burst
+        self.wait    = 0
+        self.tat     = 0   # turnaround time
+
+
+def fcfs_non_preemptive(processes: list[Process]) -> None:
+    # Sort by arrival time
+    procs = sorted(processes, key=lambda p: p.arrival)
+    clock = 0
+
+    print(f"{'PID':>4} {'Arrival':>8} {'Burst':>6} "
+          f"{'Start':>6} {'Finish':>7} {'Wait':>5} {'TAT':>5}")
+
+    for p in procs:
+        # If CPU is idle, jump forward to when process arrives
+        if clock < p.arrival:
+            clock = p.arrival
+
+        start  = clock
+        clock += p.burst          # run to completion (non-preemptive)
+        p.wait = start - p.arrival
+        p.tat  = p.wait + p.burst
+
+        print(f"{p.pid:>4} {p.arrival:>8} {p.burst:>6} "
+              f"{start:>6} {clock:>7} {p.wait:>5} {p.tat:>5}")
+
+    avg_wait = sum(p.wait for p in procs) / len(procs)
+    avg_tat  = sum(p.tat  for p in procs) / len(procs)
+    print(f"\nAvg Wait = {avg_wait:.2f}  Avg TAT = {avg_tat:.2f}")
+
+
+procs = [
+    Process(1, 0, 8),   # arrives t=0, needs 8ms CPU
+    Process(2, 1, 4),   # arrives t=1, needs 4ms CPU
+    Process(3, 2, 2),   # arrives t=2, needs 2ms CPU
+]
+fcfs_non_preemptive(procs)
+```
+
+### Python — Medium Level
+Both schedulers on the same job set — compare results to quantify the benefit of preemption.
+
+```python
+from collections import deque
+from copy import deepcopy
+from dataclasses import dataclass, field
+
+@dataclass
+class Process:
+    pid:     int
+    arrival: int
+    burst:   int
+    remaining: int = field(init=False)
+    wait:    int = 0
+    finish:  int = 0
+
+    def __post_init__(self):
+        self.remaining = self.burst
+
+
+def non_preemptive_fcfs(procs: list[Process]) -> float:
+    """Run each process to completion. O(n log n) sort + O(n) scan."""
+    jobs  = sorted(procs, key=lambda p: p.arrival)
+    clock = 0
+    for p in jobs:
+        clock   = max(clock, p.arrival)
+        p.wait  = clock - p.arrival
+        clock  += p.burst
+        p.finish = clock
+    return sum(p.wait for p in jobs) / len(jobs)
+
+
+def preemptive_rr(procs: list[Process], quantum: int = 2) -> float:
+    """Round-robin: preempts every `quantum` ms. O(total_burst)."""
+    ready = deque()
+    jobs  = sorted(procs, key=lambda p: p.arrival)
+    idx   = 0  # next unqueued process
+    clock = 0
+    done  = 0
+    n     = len(jobs)
+
+    while done < n:
+        # Admit newly arrived processes
+        while idx < n and jobs[idx].arrival <= clock:
+            ready.append(jobs[idx])
+            idx += 1
+
+        if not ready:
+            clock = jobs[idx].arrival  # CPU idle, jump to next arrival
+            continue
+
+        p = ready.popleft()
+        run_for     = min(quantum, p.remaining)
+        clock      += run_for
+        p.remaining -= run_for
+
+        # Admit any processes that arrived during this time slice
+        while idx < n and jobs[idx].arrival <= clock:
+            ready.append(jobs[idx])
+            idx += 1
+
+        if p.remaining == 0:
+            p.finish = clock
+            p.wait   = p.finish - p.arrival - p.burst
+            done    += 1
+        else:
+            ready.append(p)
+
+    return sum(p.wait for p in jobs) / n
+
+
+if __name__ == "__main__":
+    BASE = [
+        Process(1, 0, 8),
+        Process(2, 1, 4),
+        Process(3, 2, 2),
+    ]
+
+    np_avg = non_preemptive_fcfs(deepcopy(BASE))
+    pr_avg = preemptive_rr(deepcopy(BASE), quantum=2)
+
+    print(f"Non-Preemptive FCFS avg wait  : {np_avg:.2f} ms")
+    print(f"Preemptive Round Robin avg wait: {pr_avg:.2f} ms")
+    print(f"Preemption saves              : {np_avg - pr_avg:.2f} ms avg wait")
+```
+
+---
+
 ## 11. Key Takeaways
 
 - **Non-preemptive:** Process keeps CPU until done or blocked — simpler, lower overhead, but poor responsiveness

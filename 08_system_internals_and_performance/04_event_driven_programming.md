@@ -374,6 +374,7 @@ void periodic_update(Event* e) {
 > Working code that demonstrates event-driven programming in practice.
 
 ### C++ — Simple Version
+
 Implement a simple event loop — event queue, four event types (TIMER, IO_READY, USER_INPUT, QUIT), register one handler per type, dispatch events FIFO.
 
 ```cpp
@@ -493,6 +494,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Non-blocking I/O event loop — single thread monitors multiple "sockets" using select()-style readiness; timers fire at scheduled ticks; shows how Node.js and nginx handle many connections without blocking.
 
 ```cpp
@@ -631,6 +633,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Implement a simple event loop with four event types, FIFO dispatch, and registered handler callbacks — shows the three core components: event source, event queue, event loop.
 
 ```python
@@ -721,6 +724,7 @@ if __name__ == "__main__":
 ```
 
 ### Python — Medium Level
+
 Non-blocking I/O event loop — single thread monitors multiple file descriptors for readiness using a timer-driven select()-style model; shows how Node.js-style async works.
 
 ```python

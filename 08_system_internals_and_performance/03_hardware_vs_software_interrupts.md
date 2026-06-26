@@ -365,6 +365,7 @@ Interrupts are the primary mechanism enabling **preemptive multitasking**.
 > Working code that demonstrates hardware and software interrupts in practice.
 
 ### C++ — Simple Version
+
 Simulate an interrupt controller with an interrupt vector table (IVT) — hardware interrupt (timer fires every 10 ms) and software interrupts (syscall trap, page fault, divide-by-zero).
 
 ```cpp
@@ -482,6 +483,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Priority-based interrupt controller with interrupt masking — higher-priority interrupts preempt lower ones; masked interrupt lines are silently dropped (models real PIC/APIC behavior).
 
 ```cpp
@@ -607,6 +609,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Simulate the interrupt vector table (IVT) — register ISRs, then fire hardware and software interrupts and watch the full mode-switch cycle for each.
 
 ```python
@@ -703,6 +706,7 @@ if __name__ == "__main__":
 ```
 
 ### Python — Medium Level
+
 Priority-based interrupt controller with interrupt masking — higher-priority interrupts preempt lower ones; masked lines are silently dropped; EOI signals end of each ISR.
 
 ```python

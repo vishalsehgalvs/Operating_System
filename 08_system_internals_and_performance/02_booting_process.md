@@ -305,6 +305,7 @@ This is why you see a progress bar or splash screen — systemd is starting serv
 > Working code that demonstrates the boot process in practice.
 
 ### C++ — Simple Version
+
 Simulate all 8 boot stages as a chain of functions — each stage does its work and hands off to the next; if any stage fails, the boot halts.
 
 ```cpp
@@ -440,6 +441,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Dependency-based boot system like systemd — services declare what they need; topological sort (Kahn's algorithm) computes the correct start order; circular dependencies are detected.
 
 ```cpp
@@ -553,6 +555,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Simulate the boot sequence as a list of stage functions — each stage prints its actions; a stage can raise `RuntimeError` to simulate a boot failure.
 
 ```python
@@ -658,6 +661,7 @@ if __name__ == "__main__":
 ```
 
 ### Python — Medium Level
+
 Dependency-based service manager using topological sort (Kahn's algorithm) — services declare dependencies, the manager computes the correct start order and detects circular dependencies.
 
 ```python

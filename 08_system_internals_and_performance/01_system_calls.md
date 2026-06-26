@@ -394,6 +394,7 @@ fflush(file);                  // forces buffered data to kernel
 > Working code that demonstrates system calls in practice.
 
 ### C++ — Simple Version
+
 Simulate the user → kernel → user mode switch for `sys_open`, `sys_read`, `sys_write`, and `sys_fork`.
 
 ```cpp
@@ -465,6 +466,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Syscall table dispatcher using function pointers (mirrors Linux's `sys_call_table`), plus `libc` wrapper functions.
 
 ```cpp
@@ -563,6 +565,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Simulate the mode switch and kernel dispatch for `sys_open`, `sys_read`, `sys_write`, and `sys_fork` with clear print output at each step.
 
 ```python
@@ -639,6 +642,7 @@ if __name__ == "__main__":
 ```
 
 ### Python — Medium Level
+
 Syscall table with a `@register` decorator, typed results, and thin `libc` wrapper functions — mirrors the real Linux kernel design.
 
 ```python

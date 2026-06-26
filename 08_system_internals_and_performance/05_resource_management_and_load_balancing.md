@@ -388,6 +388,7 @@ Moving a process between CPUs isn't free:
 > Working code that demonstrates resource management and load balancing in practice.
 
 ### C++ — Simple Version
+
 Simulate a load balancer with three strategies: Round Robin, Least Connections, and Random — shows which server handles each request and how load distributes.
 
 ```cpp
@@ -491,6 +492,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Resource pool scheduler (assign tasks to nodes based on CPU/memory availability) plus LeetCode #621 Task Scheduler (minimum time to finish tasks with a per-type cooling period).
 
 ```cpp
@@ -628,6 +630,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Simulate a load balancer with Round Robin, Least Connections, and Random strategies — shows how each request is routed and how load distributes across three servers.
 
 ```python
@@ -712,6 +715,7 @@ if __name__ == "__main__":
 ```
 
 ### Python — Medium Level
+
 Resource pool with CPU/memory limits (First Fit bin packing) plus LeetCode #621 Task Scheduler solved with a greedy max-heap approach.
 
 ```python

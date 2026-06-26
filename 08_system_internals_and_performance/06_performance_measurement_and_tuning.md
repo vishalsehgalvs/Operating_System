@@ -433,6 +433,7 @@ echo cfq      | sudo tee /sys/block/sda/queue/scheduler   # fair for desktop
 > Working code that demonstrates performance measurement and tuning in practice.
 
 ### C++ — Simple Version
+
 Use `std::chrono` to time and compare operations — array vs linked list sequential access, binary search vs linear search, string copy vs move — shows how to profile code before optimizing.
 
 ```cpp
@@ -537,6 +538,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Function call profiler that tracks call counts and durations per function, plus a cache-friendly vs cache-unfriendly matrix traversal benchmark that demonstrates why memory access patterns matter.
 
 ```cpp
@@ -680,6 +682,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Measure and compare common Python operation pairs using `time.perf_counter()` — list vs tuple, dict lookup vs linear search, `+=` vs `join`, for-loop vs list comprehension.
 
 ```python
@@ -757,6 +760,7 @@ if __name__ == "__main__":
 ```
 
 ### Python — Medium Level
+
 Profiler decorator that tracks call count and timing per function plus a cache-friendly vs cache-unfriendly matrix access benchmark — the two most practical performance engineering tools.
 
 ```python

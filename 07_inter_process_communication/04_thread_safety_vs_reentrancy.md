@@ -387,6 +387,7 @@ int parse_expr(const char** pos) {
 > Working code that demonstrates thread safety and reentrancy in practice.
 
 ### C++ — Simple Version
+
 Non-thread-safe function uses a shared global buffer; thread-safe version uses local variables — run both with multiple threads and observe the difference.
 
 ```cpp
@@ -455,6 +456,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Thread-safe singleton, thread-safe stack, and reentrant vs non-reentrant tokenizer with nested-call demonstration.
 
 ```cpp
@@ -578,6 +580,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Non-thread-safe function uses a module-level global; thread-safe version uses only local variables — corruption is visible with enough threads.
 
 ```python
@@ -635,6 +638,7 @@ print("\nConclusion: global state → races; local state → thread-safe.")
 ```
 
 ### Python — Medium Level
+
 Thread-safe stack with a mutex, reentrant vs non-reentrant tokenizer with nested-call demonstration, and a reentrant recursive expression evaluator.
 
 ```python

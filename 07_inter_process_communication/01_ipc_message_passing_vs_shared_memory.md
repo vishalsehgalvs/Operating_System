@@ -300,6 +300,7 @@ Many real-world systems use BOTH. The pattern:
 > Working code that demonstrates IPC message passing vs shared memory in practice.
 
 ### C++ — Simple Version
+
 Simulate both IPC mechanisms with threads: message passing via a queue buffer, shared memory via a shared array.
 
 ```cpp
@@ -383,6 +384,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Benchmark throughput of message passing vs shared memory transferring N items — measure the copy overhead.
 
 ```cpp
@@ -476,6 +478,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Demonstrate both IPC mechanisms side by side: queue for message passing, shared list for shared memory.
 
 ```python
@@ -535,6 +538,7 @@ t3.start(); t4.start(); t3.join(); t4.join()
 ```
 
 ### Python — Medium Level
+
 Compare throughput of both mechanisms with timing — shows why shared memory wins for bulk data.
 
 ```python

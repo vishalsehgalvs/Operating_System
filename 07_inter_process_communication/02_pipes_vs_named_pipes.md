@@ -305,6 +305,7 @@ with open("/tmp/data_pipe", 'r') as pipe:
 > Working code that demonstrates pipes and named pipes in practice.
 
 ### C++ — Simple Version
+
 Simulate an anonymous pipe: one thread writes into a FIFO buffer, another reads — includes EOF handling.
 
 ```cpp
@@ -399,6 +400,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Simulate a named pipe with a registry: two unrelated writers connect by name (no fork required), one reader drains until EOF.
 
 ```cpp
@@ -530,6 +532,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Simulate an anonymous pipe: producer writes, consumer reads with FIFO order and EOF signalling.
 
 ```python
@@ -590,6 +593,7 @@ t1.join();  t2.join()
 ```
 
 ### Python — Medium Level
+
 Simulate a named pipe with a registry: multiple unrelated processes connect by path, reader gets EOF when all writers close.
 
 ```python

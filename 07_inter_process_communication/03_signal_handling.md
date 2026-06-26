@@ -371,6 +371,7 @@ kill -9 PID 2>/dev/null  # escalate to SIGKILL only if still running
 > Working code that demonstrates signal handling concepts in practice.
 
 ### C++ — Simple Version
+
 Simulate a per-process signal table: register custom handlers, ignore signals, deliver them — including uncatchable SIGKILL.
 
 ```cpp
@@ -484,6 +485,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Simulate signal masking: block signals during a critical section, queue them as pending, deliver when unblocked.
 
 ```cpp
@@ -596,6 +598,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Simulate a signal table: define handlers for SIGINT, SIGTERM, SIGUSR1; show SIGKILL cannot be caught.
 
 ```python
@@ -672,6 +675,7 @@ proc.deliver(SIGKILL)   # OS overrides — kills immediately
 ```
 
 ### Python — Medium Level
+
 Simulate a signal mask: block signals during a critical section, pending set, deliver on unmask.
 
 ```python

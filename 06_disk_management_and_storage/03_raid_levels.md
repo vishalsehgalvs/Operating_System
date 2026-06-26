@@ -380,6 +380,313 @@ Only RAID 0 and RAID 10 improve both reads AND writes significantly.
 
 ---
 
+## 11. Code Examples
+
+> Working code that demonstrates RAID striping, mirroring, and XOR parity in practice.
+
+### C++ — Simple Version
+Shows how a file is split (striped) across disks in RAID 0 — block-by-block visualization.
+
+```cpp
+// RAID 0 (Striping) Simulator
+// Data is split into fixed-size blocks and distributed round-robin across disks.
+// Read/write throughput scales with disk count; zero fault tolerance.
+
+#include <iostream>
+#include <vector>
+#include <string>
+
+int main() {
+    const int NUM_DISKS   = 3;   // 3 disks in the RAID 0 array
+    const int STRIPE_SIZE = 1;   // 1 block per stripe chunk (simplest case)
+
+    // Each disk holds a sequence of blocks
+    std::vector<std::vector<std::string>> disks(NUM_DISKS);
+
+    // File to store: 9 blocks labeled A through I
+    std::vector<std::string> file_blocks = {"A","B","C","D","E","F","G","H","I"};
+
+    std::cout << "RAID 0 Write — " << NUM_DISKS << " disks, stripe size = "
+              << STRIPE_SIZE << " block\n\n";
+
+    std::cout << "Block | Data | -> Disk (Round-Robin)\n";
+    std::cout << "------|------|---------------------\n";
+
+    for (int i = 0; i < (int)file_blocks.size(); i++) {
+        int disk_idx = (i / STRIPE_SIZE) % NUM_DISKS;  // which disk gets this block
+        int stripe   = i / (STRIPE_SIZE * NUM_DISKS);  // which stripe row
+
+        disks[disk_idx].push_back(file_blocks[i]);
+
+        std::cout << "  [" << i << "]  |  " << file_blocks[i]
+                  << "   |  Disk " << disk_idx
+                  << "  (stripe " << stripe << ")\n";
+    }
+
+    // Print the final physical layout stripe by stripe
+    int max_blocks = 0;
+    for (auto& d : disks) max_blocks = std::max(max_blocks, (int)d.size());
+
+    std::cout << "\nPhysical disk layout:\n";
+    std::cout << "Stripe | Disk0 | Disk1 | Disk2\n";
+    std::cout << "-------|-------|-------|------\n";
+
+    for (int s = 0; s < max_blocks; s++) {
+        std::cout << "  " << s << "    ";
+        for (auto& d : disks) {
+            std::cout << " |  " << (s < (int)d.size() ? d[s] : "-") << "  ";
+        }
+        std::cout << "\n";
+    }
+
+    std::cout << "\nRead advantage: all 3 disks can transfer simultaneously -> 3x bandwidth\n";
+    std::cout << "Risk: ONE disk failure = entire file LOST (no parity, no mirror)\n";
+    return 0;
+}
+```
+
+### C++ — Medium / LeetCode Style
+RAID 5 write with rotating XOR parity, plus recovery of a failed disk.
+
+```cpp
+// RAID 5: Distributed Parity with XOR — 1 Disk Failure Tolerance
+//
+// Layout (4 disks, parity position rotates per stripe):
+//   Stripe 0: [D0] [D1] [D2] [P ]   <- parity on disk 3
+//   Stripe 1: [D0] [D1] [P ] [D3]   <- parity on disk 2
+//   Stripe 2: [D0] [P ] [D2] [D3]   <- parity on disk 1
+//   Stripe 3: [P ] [D1] [D2] [D3]   <- parity on disk 0
+//
+// XOR math: P = D0 ^ D1 ^ D2  =>  any one missing = XOR of the rest
+
+#include <iostream>
+#include <vector>
+#include <cassert>
+#include <cstdint>
+#include <numeric>
+
+using Byte = uint8_t;
+
+// XOR all values in a list — the core of RAID parity
+Byte xor_all(const std::vector<Byte>& vals) {
+    Byte p = 0;
+    for (Byte v : vals) p ^= v;
+    return p;
+}
+
+int main() {
+    const int N = 4;   // 4 disks: 3 data + 1 parity (position rotates)
+
+    // 4 stripes of raw data (3 data bytes per stripe — one per data disk)
+    std::vector<std::vector<Byte>> data = {
+        {0xAA, 0xBB, 0xCC},   // stripe 0
+        {0x11, 0x22, 0x33},   // stripe 1
+        {0xFF, 0x0F, 0xF0},   // stripe 2
+        {0x12, 0x34, 0x56},   // stripe 3
+    };
+
+    // disks[d][s] = byte stored on disk d, stripe s
+    std::vector<std::vector<Byte>> disks(N);
+
+    // ── Write phase ───────────────────────────────────────────────────────────
+    std::cout << "RAID 5 Write Phase\n";
+    std::cout << "Stripe | Disk0  | Disk1  | Disk2  | Disk3  | Parity on\n";
+    std::cout << std::string(60, '-') << "\n";
+
+    for (int s = 0; s < (int)data.size(); s++) {
+        Byte parity    = xor_all(data[s]);             // parity = D0 ^ D1 ^ D2
+        int  parity_d  = (N - 1 - s % N);              // parity disk rotates
+
+        // Build the full stripe: insert parity at the rotating position
+        std::vector<Byte> stripe(data[s]);
+        stripe.insert(stripe.begin() + parity_d, parity);
+
+        for (int d = 0; d < N; d++) disks[d].push_back(stripe[d]);
+
+        printf("  %d    |  0x%02X  |  0x%02X  |  0x%02X  |  0x%02X  | Disk %d (P=0x%02X)\n",
+               s, stripe[0], stripe[1], stripe[2], stripe[3], parity_d, parity);
+    }
+
+    // ── Simulate Disk 1 failure and recovery ──────────────────────────────────
+    const int FAILED_DISK = 1;
+    std::cout << "\nDISK " << FAILED_DISK << " FAILED — recovering via XOR...\n";
+    std::cout << "Stripe | Disk0  | Disk1     | Disk2  | Disk3  | Recovered\n";
+    std::cout << std::string(65, '-') << "\n";
+
+    for (int s = 0; s < (int)data.size(); s++) {
+        // Collect all surviving bytes (skip the failed disk)
+        std::vector<Byte> survivors;
+        for (int d = 0; d < N; d++)
+            if (d != FAILED_DISK) survivors.push_back(disks[d][s]);
+
+        Byte recovered = xor_all(survivors);   // XOR of survivors = missing disk
+
+        assert(recovered == disks[FAILED_DISK][s]);   // verify correctness
+
+        printf("  %d    |  0x%02X  | [DEAD]    |  0x%02X  |  0x%02X  |  0x%02X OK\n",
+               s, disks[0][s], disks[2][s], disks[3][s], recovered);
+    }
+
+    std::cout << "\nXOR math: surviving D0 ^ D2 ^ D3(parity) = recovered D1\n";
+    std::cout << "RAID 5 can rebuild any single disk from the remaining data.\n";
+    return 0;
+}
+```
+
+### Python — Simple Version
+Visualizes RAID 0 file striping and RAID 1 mirroring side by side.
+
+```python
+# RAID 0 (Striping) and RAID 1 (Mirroring) — Side-by-Side Comparison
+# Shows how the same file is distributed differently on each RAID level.
+
+def raid0_write(file_blocks, num_disks):
+    """Distribute blocks round-robin across disks (RAID 0 striping)."""
+    disks = [[] for _ in range(num_disks)]
+    for i, block in enumerate(file_blocks):
+        disk_idx = i % num_disks   # round-robin: 0, 1, 2, 0, 1, 2, ...
+        disks[disk_idx].append(block)
+    return disks
+
+def raid1_write(file_blocks, num_disks=2):
+    """Write every block to ALL disks (RAID 1 mirroring)."""
+    return [list(file_blocks) for _ in range(num_disks)]
+
+def show_layout(disks, label):
+    """Print stripe-by-stripe disk layout."""
+    print(f"\n{label}")
+    max_blocks = max(len(d) for d in disks)
+    header = "Stripe  " + "".join(f" Disk{i}  " for i in range(len(disks)))
+    print(header)
+    print("-" * len(header))
+    for s in range(max_blocks):
+        row = f"  {s}     "
+        for disk in disks:
+            row += f"  [{disk[s]}]  " if s < len(disk) else "   --  "
+        print(row)
+
+    total_stored = sum(len(d) for d in disks)
+    unique_blocks = max(len(d) for d in disks)
+    efficiency = 100 * len(disks[0]) / total_stored   # % of raw capacity used
+    print(f"\nDisks: {len(disks)} x {unique_blocks} blocks stored")
+    print(f"Capacity efficiency: {efficiency:.0f}%")
+
+# 9-block file
+file_blocks = ["A", "B", "C", "D", "E", "F", "G", "H", "I"]
+
+print("=" * 45)
+print(f"File: {file_blocks} ({len(file_blocks)} blocks)")
+
+raid0 = raid0_write(file_blocks, num_disks=3)
+show_layout(raid0, "RAID 0 (Striping, 3 disks) — Speed, no safety")
+
+raid1 = raid1_write(file_blocks, num_disks=2)
+show_layout(raid1, "RAID 1 (Mirroring, 2 disks) — Safety, 50% capacity")
+
+print("\nRAID 0: one disk fails -> ALL data lost. Best for temp scratch space.")
+print("RAID 1: one disk fails -> other disk has full copy. Best for boot drives.")
+```
+
+### Python — Medium Level
+RAID 5 write with XOR parity computation, then recovery simulation from a single disk failure.
+
+```python
+# RAID 5: Distributed Parity with XOR — write, layout, and disk recovery
+# Core math: parity = D0 ^ D1 ^ D2 ... so any one missing value = XOR of rest.
+
+from functools import reduce
+
+def xor_all(values):
+    """XOR all integers in the list — the RAID 5 parity formula."""
+    return reduce(lambda a, b: a ^ b, values)
+
+class RAID5:
+    """
+    Simplified RAID 5: N disks, parity rotates left by one position per stripe.
+    Each stripe: (N-1) data blocks + 1 parity block distributed across all disks.
+    """
+    def __init__(self, num_disks):
+        self.n = num_disks
+        self.disks = [[] for _ in range(num_disks)]
+
+    def parity_disk(self, stripe_idx):
+        """Which disk holds parity for this stripe? Rotates each stripe."""
+        return (self.n - 1 - stripe_idx % self.n)
+
+    def write(self, data_blocks):
+        """Write one stripe. Needs exactly n-1 data values."""
+        assert len(data_blocks) == self.n - 1
+        s          = len(self.disks[0])   # current stripe index
+        p_disk     = self.parity_disk(s)
+        parity     = xor_all(data_blocks)
+
+        # Insert parity at the rotating position
+        stripe = list(data_blocks)
+        stripe.insert(p_disk, parity)
+
+        for d, block in enumerate(stripe):
+            self.disks[d].append(block)
+        return s, p_disk, parity
+
+    def read(self, stripe_idx, failed_disk=None):
+        """Read a stripe, reconstructing missing data via XOR if needed."""
+        stripe = [
+            self.disks[d][stripe_idx] if d != failed_disk else None
+            for d in range(self.n)
+        ]
+        if failed_disk is not None:
+            stripe[failed_disk] = xor_all([b for b in stripe if b is not None])
+        return stripe
+
+    def show(self):
+        print(f"\nRAID 5 disk layout ({self.n} disks):")
+        header = f"{'Stripe':<8}" + "".join(f"{'Disk'+str(d):<11}" for d in range(self.n))
+        print(header)
+        print("-" * len(header))
+        for s in range(len(self.disks[0])):
+            p = self.parity_disk(s)
+            row = f"  {s}     "
+            for d in range(self.n):
+                val   = self.disks[d][s]
+                label = f"0x{val:02X}{'(P)' if d == p else '   '}"
+                row  += f" {label:<10}"
+            print(row)
+
+# ── Demo ─────────────────────────────────────────────────────────────────────
+raid = RAID5(num_disks=4)   # 4 disks: 3 data + 1 parity per stripe (rotating)
+
+data_stripes = [
+    [0xAA, 0xBB, 0xCC],
+    [0x11, 0x22, 0x33],
+    [0xFF, 0x0F, 0xF0],
+    [0x12, 0x34, 0x56],
+]
+
+print("Writing 4 stripes to RAID 5:")
+for stripe_data in data_stripes:
+    s, p_disk, parity = raid.write(stripe_data)
+    print(f"  Stripe {s}: data={[f'0x{b:02X}' for b in stripe_data]}, "
+          f"parity=0x{parity:02X} on Disk {p_disk}")
+
+raid.show()
+
+# Simulate Disk 1 failure and reconstruct each stripe
+print("\n" + "=" * 50)
+print("DISK 1 FAILED — reconstructing all stripes:")
+all_ok = True
+for s in range(len(raid.disks[0])):
+    original  = [raid.disks[d][s] for d in range(raid.n)]
+    recovered = raid.read(s, failed_disk=1)
+    ok = (recovered == original)
+    all_ok = all_ok and ok
+    print(f"  Stripe {s}: {[f'0x{b:02X}' for b in recovered]}  match={ok}")
+
+print(f"\nAll stripes recovered correctly: {all_ok}")
+print("XOR math: D0 ^ D2 ^ D3(parity) = missing D1 — RAID 5 survives 1 disk loss.")
+```
+
+---
+
 ## 12. Key Takeaways
 
 - **RAID** combines multiple physical disks into one logical unit for performance, fault tolerance, or both — not a replacement for backups

@@ -319,6 +319,357 @@ Linux's **BFQ (Budget Fair Queuing)** provides both low latency and fairness for
 
 ---
 
+## 9. Code Examples
+
+> Working code that demonstrates all 5 disk scheduling algorithms in practice.
+
+### C++ — Simple Version
+FCFS disk scheduling with an ASCII head-movement trace showing the path of the disk head.
+
+```cpp
+// FCFS Disk Scheduling with ASCII Head Movement Trace
+// Serves requests in the exact order they arrived — simplest algorithm.
+// Shows a visual trace of where the disk head travels.
+
+#include <iostream>
+#include <vector>
+#include <cmath>
+
+int main() {
+    int initial_head = 53;
+    std::vector<int> requests = {98, 183, 37, 122, 14, 124, 65, 67};
+
+    std::cout << "FCFS Disk Scheduling\n";
+    std::cout << "Initial head: " << initial_head << "\n";
+    std::cout << "Requests: ";
+    for (int r : requests) std::cout << r << " ";
+    std::cout << "\n\n";
+
+    // ASCII ruler: cylinder 0..199 mapped to 40-char width
+    const int SCALE = 200, WIDTH = 40;
+    auto col = [&](int cyl) { return (int)((double)cyl / SCALE * WIDTH); };
+
+    std::cout << "Head movement trace (0 to 199):\n";
+    std::cout << "0" << std::string(WIDTH - 2, ' ') << "199\n";
+    std::cout << "|" << std::string(WIDTH - 2, '-') << "|\n";
+
+    // Print starting position
+    std::string start_row(WIDTH, ' ');
+    start_row[col(initial_head)] = 'H';
+    std::cout << start_row << "  <- start (" << initial_head << ")\n";
+
+    int total_seek = 0;
+    int current = initial_head;
+
+    for (int req : requests) {
+        int distance = std::abs(req - current);
+        total_seek += distance;
+
+        // Draw movement range with '=' and destination with '*'
+        std::string row(WIDTH, ' ');
+        int from_col = col(current), to_col = col(req);
+        if (from_col > to_col) std::swap(from_col, to_col);
+        for (int i = from_col; i <= to_col; i++) row[i] = '=';
+        row[col(req)] = '*';
+
+        std::cout << row << "  " << current << " -> " << req
+                  << "  (+" << distance << ")\n";
+        current = req;
+    }
+
+    std::cout << "\nTotal head movement: " << total_seek << " cylinders\n";
+    return 0;
+}
+```
+
+### C++ — Medium / LeetCode Style
+All 5 disk scheduling algorithms (FCFS, SSTF, SCAN, C-SCAN, LOOK, C-LOOK) with total movement comparison.
+
+```cpp
+// All 5 Disk Scheduling Algorithms — Comparison
+// Input: initial head position + list of cylinder requests
+// Output: service order and total cylinders traveled for each algorithm
+
+#include <iostream>
+#include <vector>
+#include <algorithm>
+#include <cmath>
+
+// ── FCFS: serve in arrival order ────────────────────────────────────────────
+int fcfs(int head, std::vector<int> reqs) {
+    int total = 0, cur = head;
+    std::cout << "  FCFS  : " << cur;
+    for (int r : reqs) {
+        total += std::abs(r - cur); cur = r;
+        std::cout << " -> " << r;
+    }
+    std::cout << "\n";
+    return total;
+}
+
+// ── SSTF: always pick the nearest unserved request ──────────────────────────
+int sstf(int head, std::vector<int> reqs) {
+    std::vector<bool> served(reqs.size(), false);
+    int total = 0, cur = head;
+    std::cout << "  SSTF  : " << cur;
+    for (size_t i = 0; i < reqs.size(); i++) {
+        int nearest = -1, min_dist = INT_MAX;
+        for (size_t j = 0; j < reqs.size(); j++) {
+            if (!served[j]) {
+                int d = std::abs(reqs[j] - cur);
+                if (d < min_dist) { min_dist = d; nearest = (int)j; }
+            }
+        }
+        served[nearest] = true;
+        total += min_dist; cur = reqs[nearest];
+        std::cout << " -> " << cur;
+    }
+    std::cout << "\n";
+    return total;
+}
+
+// ── SCAN: sweep right to max_cyl, then sweep left ───────────────────────────
+int scan(int head, std::vector<int> reqs, int max_cyl) {
+    std::vector<int> left, right;
+    for (int r : reqs) (r < head ? left : right).push_back(r);
+    std::sort(left.rbegin(), left.rend());    // serve largest-first on way back
+    std::sort(right.begin(), right.end());    // serve smallest-first going right
+
+    int total = 0, cur = head;
+    std::cout << "  SCAN  : " << cur;
+    for (int r : right) { total += std::abs(r - cur); cur = r; std::cout << " -> " << r; }
+    // Travel to disk boundary before reversing
+    total += std::abs(max_cyl - cur); cur = max_cyl;
+    std::cout << " -> " << max_cyl << "(end)";
+    for (int r : left)  { total += std::abs(r - cur); cur = r; std::cout << " -> " << r; }
+    std::cout << "\n";
+    return total;
+}
+
+// ── C-SCAN: sweep right to end, jump to 0, sweep right again ────────────────
+int cscan(int head, std::vector<int> reqs, int max_cyl) {
+    std::vector<int> left, right;
+    for (int r : reqs) (r < head ? left : right).push_back(r);
+    std::sort(left.begin(),  left.end());   // serve after the jump (ascending)
+    std::sort(right.begin(), right.end());
+
+    int total = 0, cur = head;
+    std::cout << "  C-SCAN: " << cur;
+    for (int r : right) { total += std::abs(r - cur); cur = r; std::cout << " -> " << r; }
+    total += std::abs(max_cyl - cur); cur = max_cyl;
+    std::cout << " -> " << max_cyl << "(end)";
+    total += max_cyl; cur = 0;   // jump from max_cyl back to 0
+    std::cout << " -> 0(jump)";
+    for (int r : left)  { total += r - cur; cur = r; std::cout << " -> " << r; }
+    std::cout << "\n";
+    return total;
+}
+
+// ── LOOK: like SCAN but reverses at last request, not disk boundary ──────────
+int look(int head, std::vector<int> reqs) {
+    std::vector<int> left, right;
+    for (int r : reqs) (r < head ? left : right).push_back(r);
+    std::sort(left.rbegin(), left.rend());
+    std::sort(right.begin(), right.end());
+
+    int total = 0, cur = head;
+    std::cout << "  LOOK  : " << cur;
+    for (int r : right) { total += std::abs(r - cur); cur = r; std::cout << " -> " << r; }
+    for (int r : left)  { total += std::abs(r - cur); cur = r; std::cout << " -> " << r; }
+    std::cout << "\n";
+    return total;
+}
+
+// ── C-LOOK: like C-SCAN but jumps to first pending, not cylinder 0 ───────────
+int clook(int head, std::vector<int> reqs) {
+    std::vector<int> left, right;
+    for (int r : reqs) (r < head ? left : right).push_back(r);
+    std::sort(left.begin(),  left.end());
+    std::sort(right.begin(), right.end());
+
+    int total = 0, cur = head;
+    std::cout << "  C-LOOK: " << cur;
+    for (int r : right) { total += std::abs(r - cur); cur = r; std::cout << " -> " << r; }
+    if (!left.empty()) {
+        total += std::abs(cur - left.front()); cur = left.front();
+        std::cout << " -> " << cur << "(jump)";
+        for (size_t i = 1; i < left.size(); i++) {
+            total += std::abs(left[i] - cur); cur = left[i];
+            std::cout << " -> " << cur;
+        }
+    }
+    std::cout << "\n";
+    return total;
+}
+
+int main() {
+    int head = 53;
+    std::vector<int> requests = {98, 183, 37, 122, 14, 124, 65, 67};
+    int MAX_CYL = 199;
+
+    std::cout << "Disk Scheduling Algorithms Comparison\n";
+    std::cout << "Head=" << head << "  Requests: ";
+    for (int r : requests) std::cout << r << " ";
+    std::cout << "\n" << std::string(65, '=') << "\n";
+
+    std::cout << "Service order:\n";
+    int m1 = fcfs (head, requests);
+    int m2 = sstf (head, requests);
+    int m3 = scan (head, requests, MAX_CYL);
+    int m4 = cscan(head, requests, MAX_CYL);
+    int m5 = look (head, requests);
+    int m6 = clook(head, requests);
+
+    std::cout << "\nTotal head movement (cylinders):\n";
+    std::cout << std::string(35, '-') << "\n";
+    printf("  FCFS   : %4d\n", m1);
+    printf("  SSTF   : %4d\n", m2);
+    printf("  SCAN   : %4d  (includes travel to boundary)\n", m3);
+    printf("  C-SCAN : %4d  (includes jump from end to 0)\n", m4);
+    printf("  LOOK   : %4d\n", m5);
+    printf("  C-LOOK : %4d  (includes jump to first pending)\n", m6);
+    return 0;
+}
+```
+
+### Python — Simple Version
+SSTF implementation step-by-step, showing which request is chosen at each move.
+
+```python
+# SSTF (Shortest Seek Time First) Disk Scheduling — Step-by-Step
+# At each step, pick the unserved request closest to the current head position.
+# Classic greedy algorithm: minimizes immediate seek but can starve far requests.
+
+def sstf(initial_head, requests):
+    """
+    SSTF disk scheduling.
+    Returns: total head movement (cylinders).
+    """
+    remaining = list(requests)    # requests not yet served
+    current   = initial_head
+    total     = 0
+    order     = [current]
+
+    print(f"SSTF Disk Scheduling")
+    print(f"Initial head : {initial_head}")
+    print(f"Requests     : {requests}\n")
+    print(f"{'Step':<5} {'From':>5} {'To':>5} {'Dist':>6}  Remaining")
+    print("-" * 55)
+
+    step = 1
+    while remaining:
+        # Greedy choice: nearest cylinder to current head
+        nearest  = min(remaining, key=lambda r: abs(r - current))
+        distance = abs(nearest - current)
+
+        print(f"{step:<5} {current:>5} {nearest:>5} {distance:>6}  {remaining}")
+
+        total += distance
+        remaining.remove(nearest)
+        current = nearest
+        order.append(current)
+        step += 1
+
+    print("-" * 55)
+    print(f"Service order  : {order}")
+    print(f"Total movement : {total} cylinders")
+    return total
+
+# Classic OS textbook example
+sstf(initial_head=53,
+     requests=[98, 183, 37, 122, 14, 124, 65, 67])
+```
+
+### Python — Medium Level
+All 5 algorithms implemented and compared, with an ASCII bar chart of total head movement.
+
+```python
+# All 5 Disk Scheduling Algorithms — Python Implementation + Comparison
+# Each function returns (total_movement, service_order).
+
+def fcfs(head, requests):
+    total, cur, order = 0, head, [head]
+    for r in requests:
+        total += abs(r - cur); cur = r; order.append(cur)
+    return total, order
+
+def sstf(head, requests):
+    remaining, total, cur, order = list(requests), 0, head, [head]
+    while remaining:
+        nearest = min(remaining, key=lambda r: abs(r - cur))
+        total += abs(nearest - cur); cur = nearest
+        remaining.remove(cur); order.append(cur)
+    return total, order
+
+def scan(head, requests, max_cyl=199):
+    left  = sorted([r for r in requests if r <  head], reverse=True)
+    right = sorted([r for r in requests if r >= head])
+    total, cur, order = 0, head, [head]
+    for r in right: total += abs(r - cur); cur = r; order.append(cur)
+    if right:        total += abs(max_cyl - cur); cur = max_cyl; order.append(cur)
+    for r in left:  total += abs(r - cur); cur = r; order.append(cur)
+    return total, order
+
+def cscan(head, requests, max_cyl=199):
+    left  = sorted([r for r in requests if r <  head])
+    right = sorted([r for r in requests if r >= head])
+    total, cur, order = 0, head, [head]
+    for r in right:
+        total += abs(r - cur); cur = r; order.append(cur)
+    total += abs(max_cyl - cur); cur = max_cyl; order.append(cur)
+    total += max_cyl;            cur = 0;       order.append(0)   # jump to 0
+    for r in left:
+        total += abs(r - cur); cur = r; order.append(cur)
+    return total, order
+
+def look(head, requests):
+    left  = sorted([r for r in requests if r <  head], reverse=True)
+    right = sorted([r for r in requests if r >= head])
+    total, cur, order = 0, head, [head]
+    for r in right: total += abs(r - cur); cur = r; order.append(cur)
+    for r in left:  total += abs(r - cur); cur = r; order.append(cur)
+    return total, order
+
+def clook(head, requests):
+    left  = sorted([r for r in requests if r <  head])
+    right = sorted([r for r in requests if r >= head])
+    total, cur, order = 0, head, [head]
+    for r in right: total += abs(r - cur); cur = r; order.append(cur)
+    if left:
+        total += abs(cur - left[0]); cur = left[0]; order.append(cur)  # jump
+        for r in left[1:]:
+            total += abs(r - cur); cur = r; order.append(cur)
+    return total, order
+
+# ── Run comparison ────────────────────────────────────────────────────────────
+head     = 53
+requests = [98, 183, 37, 122, 14, 124, 65, 67]
+
+algorithms = [
+    ("FCFS",   fcfs(head, requests)),
+    ("SSTF",   sstf(head, requests)),
+    ("SCAN",   scan(head, requests)),
+    ("C-SCAN", cscan(head, requests)),
+    ("LOOK",   look(head, requests)),
+    ("C-LOOK", clook(head, requests)),
+]
+
+print(f"Disk Scheduling | Head={head} | Requests={requests}")
+print("=" * 65)
+print(f"{'Algorithm':<10} {'Movement':>10}  Bar (each block = 10 cylinders)")
+print("-" * 65)
+
+for name, (total, order) in algorithms:
+    bar = "#" * (total // 10)
+    print(f"{name:<10} {total:>7} cyl  {bar}")
+
+print("\nDetailed service order:")
+for name, (total, order) in algorithms:
+    print(f"  {name:<8}: {' -> '.join(map(str, order))}")
+```
+
+---
+
 ## 10. Key Takeaways
 
 - **FCFS**: serve in arrival order — perfect fairness, zero optimization, 581 tracks (worst)

@@ -301,6 +301,336 @@ free -h
 
 ---
 
+## 9. Code Examples
+
+> Working code that demonstrates print spooling queues and swap space management in practice.
+
+### C++ — Simple Version
+Print spooler simulation: jobs are added to a FIFO queue and processed one at a time by a daemon.
+
+```cpp
+// Print Spooler Simulation
+// Processes submit jobs to a shared spool queue (non-blocking).
+// A printer daemon processes jobs one at a time from the queue.
+
+#include <iostream>
+#include <queue>
+#include <string>
+#include <thread>
+#include <chrono>
+
+struct PrintJob {
+    int         id;
+    std::string name;
+    int         pages;
+};
+
+// Shared FIFO spool queue — all processes write here, daemon reads from here
+std::queue<PrintJob> spool_queue;
+
+// Add a job to the queue (instant — caller is never blocked)
+void spool(PrintJob job) {
+    spool_queue.push(job);
+    std::cout << "[SPOOL]  Job #" << job.id << " queued: \""
+              << job.name << "\" (" << job.pages << " pages)\n";
+}
+
+// Printer daemon: runs in background, prints jobs one at a time
+void printer_daemon() {
+    std::cout << "\n[DAEMON] Printer daemon started\n\n";
+
+    while (!spool_queue.empty()) {
+        PrintJob job = spool_queue.front();
+        spool_queue.pop();
+
+        std::cout << "[PRINT]  Job #" << job.id
+                  << " started: \"" << job.name << "\"\n";
+
+        // Simulate printing each page (200 ms per page)
+        for (int p = 1; p <= job.pages; p++) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            std::cout << "         Page " << p << "/" << job.pages
+                      << " done\n";
+        }
+
+        std::cout << "[DONE]   Job #" << job.id << " complete\n\n";
+    }
+
+    std::cout << "[DAEMON] Queue empty — printer idle\n";
+}
+
+int main() {
+    std::cout << "=== Print Spooler Simulation ===\n\n";
+
+    // Multiple processes submit print jobs (all non-blocking)
+    spool({1, "Report.pdf",   3});
+    spool({2, "Invoice.docx", 1});
+    spool({3, "Slides.pptx",  5});
+    spool({4, "Email.txt",    1});
+
+    std::cout << "\nJobs in queue: " << spool_queue.size() << "\n";
+
+    // Daemon processes the queue independently
+    printer_daemon();
+    return 0;
+}
+```
+
+### C++ — Medium / LeetCode Style
+Swap space manager using LRU eviction: when RAM is full, the least-recently-used process is moved to swap.
+
+```cpp
+// Swap Space Simulator with LRU Eviction
+// Fixed-capacity RAM; when full, the Least Recently Used (LRU) process
+// is swapped out to disk to make room for the new process.
+
+#include <iostream>
+#include <list>
+#include <unordered_map>
+#include <vector>
+#include <string>
+#include <algorithm>
+
+struct Process {
+    int         pid;
+    std::string name;
+    int         size_mb;
+};
+
+class SwapManager {
+    int                  capacity;    // max processes in RAM
+    std::list<Process>   ram;         // LRU list: front = MRU, back = LRU
+    std::unordered_map<int, std::list<Process>::iterator> ram_index;
+    std::vector<Process> swap;        // processes currently on disk (swap)
+    int swap_outs = 0, swap_ins = 0;
+
+public:
+    explicit SwapManager(int cap) : capacity(cap) {}
+
+    void load(Process proc) {
+        std::cout << "\nLoad P" << proc.pid
+                  << " '" << proc.name << "' (" << proc.size_mb << " MB)\n";
+
+        // Already in RAM — just promote to MRU position
+        if (ram_index.count(proc.pid)) {
+            ram.splice(ram.begin(), ram, ram_index[proc.pid]);
+            std::cout << "  Already in RAM (promoted to MRU)\n";
+            print_state();
+            return;
+        }
+
+        // In swap? Swap it in from disk
+        auto it = std::find_if(swap.begin(), swap.end(),
+                               [&](const Process& p){ return p.pid == proc.pid; });
+        if (it != swap.end()) {
+            std::cout << "  SWAP-IN (disk -> RAM, slow!)\n";
+            proc = *it;
+            swap.erase(it);
+            swap_ins++;
+        }
+
+        // RAM full? Evict LRU to swap
+        if ((int)ram.size() >= capacity) {
+            Process lru = ram.back();
+            ram.pop_back();
+            ram_index.erase(lru.pid);
+            swap.push_back(lru);
+            swap_outs++;
+            std::cout << "  SWAP-OUT: P" << lru.pid << " '" << lru.name
+                      << "' evicted (LRU) to disk\n";
+        }
+
+        // Load process into RAM at MRU position (front of list)
+        ram.push_front(proc);
+        ram_index[proc.pid] = ram.begin();
+        std::cout << "  Loaded into RAM\n";
+        print_state();
+    }
+
+    void print_state() const {
+        std::cout << "  RAM  [MRU..LRU]: ";
+        for (const auto& p : ram)
+            std::cout << "P" << p.pid << "(" << p.name << ") ";
+        std::cout << "\n";
+        std::cout << "  SWAP [disk]    : ";
+        if (swap.empty()) {
+            std::cout << "(empty)";
+        } else {
+            for (const auto& p : swap)
+                std::cout << "P" << p.pid << "(" << p.name << ") ";
+        }
+        std::cout << "\n";
+    }
+
+    void summary() const {
+        std::cout << "\n=== Swap Summary ===\n";
+        std::cout << "Swap-outs (RAM -> disk) : " << swap_outs << "\n";
+        std::cout << "Swap-ins  (disk -> RAM) : " << swap_ins  << "\n";
+        if (swap_outs >= 3)
+            std::cout << "WARNING: Frequent swapping detected — add more RAM!\n";
+        else
+            std::cout << "OK: moderate swapping — monitor memory usage.\n";
+    }
+};
+
+int main() {
+    std::cout << "=== Swap Space Simulation (RAM: 3 process slots) ===\n";
+    SwapManager mgr(3);
+
+    mgr.load({1, "Browser",  512});
+    mgr.load({2, "Editor",   256});
+    mgr.load({3, "Terminal", 128});
+    mgr.load({4, "IDE",      768});  // RAM full -> evict LRU (P1)
+    mgr.load({1, "Browser",  512});  // P1 in swap -> swap-in, evict LRU (P2)
+    mgr.load({5, "Game",    1024});  // another swap-out
+
+    mgr.summary();
+    return 0;
+}
+```
+
+### Python — Simple Version
+Print spooler with a background daemon thread processing jobs from a shared queue.
+
+```python
+# Print Spooler: multiple callers add jobs to a shared queue (non-blocking),
+# a single daemon thread drains the queue and "prints" jobs one at a time.
+
+import queue
+import time
+import threading
+
+# Shared FIFO spool queue — all processes write here
+spool_queue = queue.Queue()
+
+def submit_job(job_id, filename, pages):
+    """Any process calls this to submit a print job — returns immediately."""
+    spool_queue.put({"id": job_id, "file": filename, "pages": pages})
+    print(f"[SPOOL]  Job #{job_id} queued: '{filename}' ({pages} pages)")
+
+def printer_daemon():
+    """Background daemon: processes jobs one at a time until queue is empty."""
+    print("\n[DAEMON] Printer started\n")
+    while True:
+        try:
+            job = spool_queue.get(timeout=2)   # wait up to 2s for a job
+        except queue.Empty:
+            print("[DAEMON] Queue empty — printer idle")
+            break
+
+        print(f"[PRINT]  Job #{job['id']} started: '{job['file']}'")
+        for page in range(1, job["pages"] + 1):
+            time.sleep(0.1)                    # simulate printing time per page
+            print(f"         Page {page}/{job['pages']}")
+        print(f"[DONE]   Job #{job['id']} complete\n")
+        spool_queue.task_done()
+
+# ── Multiple processes submit jobs rapidly (non-blocking) ────────────────────
+print("=== Print Spooler Simulation ===\n")
+
+submit_job(1, "Report.pdf",   3)
+submit_job(2, "Invoice.docx", 1)
+submit_job(3, "Slides.pptx",  5)
+submit_job(4, "Email.txt",    1)
+
+print(f"\nQueue depth: {spool_queue.qsize()} jobs pending\n")
+
+# Launch daemon in background thread — processes queue while caller continues
+daemon = threading.Thread(target=printer_daemon, daemon=True)
+daemon.start()
+daemon.join()   # wait for all jobs to finish before program exits
+```
+
+### Python — Medium Level
+Swap space simulator with LRU eviction: tracks RAM and disk swap state across multiple process loads.
+
+```python
+# Swap Space Simulator with LRU Eviction
+# Simulates OS memory management: limited RAM slots, overflow goes to swap (disk).
+# Uses an OrderedDict as an LRU cache: MRU = last item, LRU = first item.
+
+from collections import OrderedDict
+
+class SwapSimulator:
+    """
+    Fixed-capacity RAM with LRU eviction to swap.
+    When RAM fills up, the Least Recently Used process is moved to disk (swap).
+    Accessing a swapped-out process triggers a slow swap-in.
+    """
+    def __init__(self, ram_slots):
+        self.ram_slots  = ram_slots
+        self.ram        = OrderedDict()  # pid -> info; LRU = first, MRU = last
+        self.swap       = {}             # pid -> info; processes on disk
+        self.swap_outs  = 0
+        self.swap_ins   = 0
+
+    def load(self, pid, name, size_mb):
+        print(f"\nLoad P{pid} '{name}' ({size_mb} MB)")
+
+        if pid in self.ram:
+            # Already in RAM — promote to MRU (move_to_end)
+            self.ram.move_to_end(pid)
+            print("  Already in RAM (marked recently used)")
+            self._show()
+            return
+
+        if pid in self.swap:
+            # Process is on disk — swap it back into RAM
+            print(f"  SWAP-IN: P{pid} read from disk  <-- slow!")
+            self.swap_ins += 1
+
+        if len(self.ram) >= self.ram_slots:
+            # RAM full: evict the LRU process (first item in OrderedDict)
+            lru_pid, lru_info = next(iter(self.ram.items()))
+            del self.ram[lru_pid]
+            self.swap[lru_pid] = lru_info
+            self.swap_outs += 1
+            print(f"  SWAP-OUT: P{lru_pid} '{lru_info['name']}' moved to disk (LRU)")
+
+        # Load process into RAM (MRU position = end of OrderedDict)
+        self.ram[pid] = {"name": name, "size_mb": size_mb}
+        if pid in self.swap:
+            del self.swap[pid]   # no longer in swap
+
+        print("  Loaded into RAM")
+        self._show()
+
+    def _show(self):
+        ram_list  = [f"P{p}({v['name']})" for p, v in self.ram.items()]
+        swap_list = [f"P{p}({v['name']})" for p, v in self.swap.items()]
+        print(f"  RAM  [LRU -> MRU]: [{', '.join(ram_list)}]  "
+              f"({len(self.ram)}/{self.ram_slots} slots)")
+        print(f"  SWAP [disk]      : [{', '.join(swap_list) or 'empty'}]")
+
+    def summary(self):
+        print("\n" + "=" * 48)
+        print("Swap Activity Summary")
+        print(f"  Swap-outs (RAM -> disk) : {self.swap_outs}")
+        print(f"  Swap-ins  (disk -> RAM) : {self.swap_ins}")
+        if self.swap_outs >= 3:
+            print("  WARNING: Heavy swapping detected — system may be thrashing!")
+            print("  Fix: add more physical RAM.")
+        elif self.swap_outs > 0:
+            print("  Some swapping — monitor memory usage.")
+        else:
+            print("  No swapping — RAM is sufficient for this workload.")
+
+# ── Simulation ────────────────────────────────────────────────────────────────
+print("Swap Space Simulation  (RAM = 3 slots)")
+sim = SwapSimulator(ram_slots=3)
+
+sim.load(1, "Browser",  512)
+sim.load(2, "Editor",   256)
+sim.load(3, "Terminal", 128)
+sim.load(4, "IDE",      768)   # RAM full -> evict LRU (P1) to swap
+sim.load(1, "Browser",  512)   # P1 in swap -> swap-in, evict LRU (P2)
+sim.load(5, "Game",    1024)   # another eviction
+
+sim.summary()
+```
+
+---
+
 ## 10. Key Takeaways
 
 - **Spooling** = Simultaneous Peripheral Operations On-Line — queues slow device output to disk so processes don't block waiting for the device

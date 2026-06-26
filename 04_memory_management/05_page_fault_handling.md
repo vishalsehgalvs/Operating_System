@@ -298,6 +298,387 @@ Most modern OSes use a hybrid — pure demand paging during normal execution, pr
 
 ---
 
+## 9. Code Examples
+
+> Working code that demonstrates the Page Fault Handler in practice.
+
+### C++ — Simple Version
+Simulate the full 6-step page fault handler — valid bit check, find/evict frame, load from disk, update page table, restart instruction.
+
+```cpp
+// Page Fault Handler Simulation — 6-step OS routine
+// Compile: g++ -std=c++17 page_fault.cpp -o page_fault
+
+#include <iostream>
+#include <vector>
+#include <queue>
+using namespace std;
+
+const int NUM_FRAMES = 4;
+const int NUM_PAGES  = 8;
+
+// Page table entry: valid bit, frame number, dirty bit
+struct PTE {
+    bool valid;     // 1 = page is in RAM, 0 = page is on disk
+    int  frame;     // physical frame holding this page (-1 if invalid)
+    bool dirty;     // 1 = page was written to (must write back on eviction)
+};
+
+PTE pageTable[NUM_PAGES] = {};       // all invalid at start
+int frameToPage[NUM_FRAMES];         // which page occupies each frame (-1 = empty)
+queue<int> freeFrames;               // free frame pool
+int pageFaults = 0;
+
+// Full page fault handler — called by the OS when MMU finds valid=0
+void handlePageFault(int faultingPage) {
+    pageFaults++;
+    cout << "\n[PAGE FAULT #" << pageFaults << "] Page "
+         << faultingPage << " not in RAM\n";
+
+    // Step 1: Is this a legal access? (check OS process table)
+    if (faultingPage < 0 || faultingPage >= NUM_PAGES) {
+        cout << "  Step 1: ILLEGAL address -> SEGFAULT, kill process\n";
+        return;
+    }
+    cout << "  Step 1: Valid page, process state saved\n";
+
+    // Steps 2–3: Find a free frame (or evict a victim)
+    int frame;
+    if (!freeFrames.empty()) {
+        frame = freeFrames.front();
+        freeFrames.pop();
+        cout << "  Step 2-3: Free frame " << frame << " available\n";
+    } else {
+        // FIFO eviction (real OS uses clock/LRU approximation)
+        frame = 0;   // simplified: always try frame 0 first when full
+        // Find the actual oldest-loaded frame in a real impl via a queue
+        int victim = frameToPage[frame];
+        cout << "  Step 2-3: Evicting page " << victim
+             << " from frame " << frame;
+        if (pageTable[victim].dirty)
+            cout << " (dirty — write to disk first)";
+        cout << "\n";
+        pageTable[victim] = {false, -1, false};
+    }
+
+    // Step 4: Load faulting page from disk into the free frame
+    cout << "  Step 4: Load page " << faultingPage
+         << " from disk into frame " << frame << "\n";
+
+    // Step 5: Update the page table
+    pageTable[faultingPage] = {true, frame, false};
+    frameToPage[frame]      = faultingPage;
+    cout << "  Step 5: Page table updated — page "
+         << faultingPage << " -> frame " << frame << "\n";
+
+    // Step 6: Restart the faulting instruction (the CPU re-fetches it)
+    cout << "  Step 6: Instruction restarted, process resumes\n";
+}
+
+void accessPage(int page, bool write = false) {
+    cout << "\nAccess page " << page << (write ? " (WRITE)" : " (READ)") << ": ";
+    if (pageTable[page].valid) {
+        cout << "HIT (frame " << pageTable[page].frame << ")\n";
+        if (write) pageTable[page].dirty = true;
+    } else {
+        cout << "MISS\n";
+        handlePageFault(page);
+        if (write) pageTable[page].dirty = true;
+    }
+}
+
+int main() {
+    // Initialise: all 4 frames are free, all pages start on disk
+    for (int i = 0; i < NUM_FRAMES; i++) {
+        freeFrames.push(i);
+        frameToPage[i] = -1;
+    }
+
+    cout << "=== Page Fault Handler (" << NUM_FRAMES
+         << " frames, " << NUM_PAGES << " virtual pages) ===";
+
+    accessPage(0);           // fault: load into frame 0
+    accessPage(1);           // fault: load into frame 1
+    accessPage(2);           // fault: load into frame 2
+    accessPage(3);           // fault: load into frame 3
+    accessPage(0);           // HIT
+    accessPage(1, true);     // HIT, sets dirty bit
+    accessPage(4);           // fault: no free frames, evict (frame 0)
+    accessPage(0);           // fault: page 0 was evicted
+
+    cout << "\n\nTotal page faults: " << pageFaults << "\n";
+    return 0;
+}
+```
+
+### C++ — Medium / LeetCode Style
+Page fault handler with **clock (second-chance) eviction** — the algorithm Linux and Windows actually approximate.
+
+```cpp
+// Page Fault Handler with Clock (Second-Chance) Eviction
+// Compile: g++ -std=c++17 page_fault_clock.cpp -o page_fault_clock
+
+#include <iostream>
+#include <vector>
+using namespace std;
+
+struct Frame {
+    int  page;        // page number occupying this frame (-1 = empty)
+    bool referenced;  // reference bit for clock algorithm
+    bool dirty;       // dirty bit for write-back tracking
+};
+
+class PageFaultHandler {
+    vector<Frame> frames;
+    vector<bool>  valid;
+    vector<int>   frameOf;   // frameOf[page] = frame number
+    int clockHand = 0;
+    int faults = 0, accesses = 0;
+
+public:
+    PageFaultHandler(int nFrames, int nPages)
+        : frames(nFrames, {-1, false, false}),
+          valid(nPages, false),
+          frameOf(nPages, -1) {}
+
+    // Clock eviction: skip pages with reference bit=1 (give them a second chance)
+    int clockEvict() {
+        while (true) {
+            if (!frames[clockHand].referenced) {
+                int victim = clockHand;
+                clockHand  = (clockHand + 1) % frames.size();
+                return victim;
+            }
+            frames[clockHand].referenced = false;   // second chance granted
+            clockHand = (clockHand + 1) % frames.size();
+        }
+    }
+
+    void access(int page, bool write = false) {
+        accesses++;
+        if (valid[page]) {
+            frames[frameOf[page]].referenced = true;    // update reference bit
+            if (write) frames[frameOf[page]].dirty = true;
+            return;
+        }
+
+        // PAGE FAULT
+        faults++;
+        // Find a free frame, or evict via clock
+        int target = -1;
+        for (int i = 0; i < (int)frames.size(); i++)
+            if (frames[i].page == -1) { target = i; break; }
+
+        if (target == -1) {
+            target = clockEvict();
+            int victim = frames[target].page;
+            valid[victim]    = false;
+            frameOf[victim]  = -1;
+            cout << "  [FAULT #" << faults << "] Evict page " << victim
+                 << (frames[target].dirty ? " (write-back)" : "")
+                 << " -> load page " << page << " into frame " << target << "\n";
+        } else {
+            cout << "  [FAULT #" << faults << "] Free frame " << target
+                 << " -> load page " << page << "\n";
+        }
+
+        frames[target] = {page, true, write};
+        valid[page]    = true;
+        frameOf[page]  = target;
+    }
+
+    void printStats() {
+        double rate = 100.0 * faults / accesses;
+        cout << "\nAccesses: " << accesses << "  Faults: " << faults
+             << "  Fault rate: " << rate << "%\n";
+    }
+};
+
+int main() {
+    PageFaultHandler h(3, 8);
+    vector<int> refs = {0, 1, 2, 3, 0, 1, 4, 0, 1, 2, 3, 4};
+
+    cout << "=== Page Fault Handler: Clock Eviction (3 frames) ===\n";
+    for (int p : refs) h.access(p);
+    h.printStats();
+    return 0;
+}
+```
+
+### Python — Simple Version
+Simulate the full 6-step page fault handler with step-by-step printed output.
+
+```python
+# Page Fault Handler — 6-step OS routine.
+# Run: python page_fault.py
+
+NUM_FRAMES = 4
+NUM_PAGES  = 8
+
+# Page table: each entry tracks whether the page is in RAM and where
+page_table  = [{"valid": False, "frame": -1, "dirty": False}
+               for _ in range(NUM_PAGES)]
+frame_to_page = [-1] * NUM_FRAMES      # which page is in each frame
+free_frames   = list(range(NUM_FRAMES)) # all frames start free
+page_faults   = 0
+
+
+def handle_page_fault(page: int):
+    """OS page fault handler — called when MMU sees valid=0."""
+    global page_faults
+    page_faults += 1
+    print(f"\n  [PAGE FAULT #{page_faults}] page {page} not in RAM")
+
+    # Step 1: Validate — is this address legally owned by the process?
+    if not (0 <= page < NUM_PAGES):
+        print("  Step 1: ILLEGAL access -> SEGFAULT, OS terminates process")
+        return
+    print("  Step 1: Valid access, CPU state saved (registers, PC)")
+
+    # Steps 2-3: Find a free frame, or evict via FIFO
+    if free_frames:
+        frame = free_frames.pop(0)
+        print(f"  Step 2-3: Free frame {frame} available")
+    else:
+        # Evict page in frame 0 (simplified FIFO — real OS uses clock/LRU)
+        frame        = 0
+        victim_page  = frame_to_page[frame]
+        write_back   = " (dirty — write to disk)" if page_table[victim_page]["dirty"] else ""
+        print(f"  Step 2-3: No free frames — evict page {victim_page}"
+              f" from frame {frame}{write_back}")
+        page_table[victim_page].update({"valid": False, "frame": -1})
+        frame_to_page[frame] = -1
+
+    # Step 4: Load page from disk into the chosen frame
+    print(f"  Step 4: Loading page {page} from disk into frame {frame}")
+
+    # Step 5: Update page table
+    page_table[page].update({"valid": True, "frame": frame})
+    frame_to_page[frame] = page
+    print(f"  Step 5: Page table updated — page {page} -> frame {frame}")
+
+    # Step 6: Restart the faulting instruction
+    print(f"  Step 6: Instruction restarted, process resumes")
+
+
+def access_page(page: int, write: bool = False):
+    """Simulate a process accessing a virtual page."""
+    mode = "WRITE" if write else "READ"
+    print(f"\nAccess page {page} ({mode}): ", end="")
+    if page_table[page]["valid"]:
+        print(f"HIT (frame {page_table[page]['frame']})")
+        if write:
+            page_table[page]["dirty"] = True
+    else:
+        print("MISS")
+        handle_page_fault(page)
+        if write:
+            page_table[page]["dirty"] = True
+
+
+print("=== Page Fault Handler Simulation ===")
+print(f"Frames: {NUM_FRAMES}  |  Virtual pages: {NUM_PAGES}")
+
+access_page(0)           # fault: load page 0 → frame 0
+access_page(1)           # fault: load page 1 → frame 1
+access_page(2)           # fault: load page 2 → frame 2
+access_page(3)           # fault: load page 3 → frame 3
+access_page(0)           # HIT
+access_page(1, write=True)  # HIT, marks dirty
+access_page(4)           # fault: no free frames, evict page from frame 0
+access_page(0)           # fault: page 0 was evicted
+
+print(f"\nTotal page faults: {page_faults}")
+```
+
+### Python — Medium Level
+Page fault handler with **clock (second-chance) eviction** — the algorithm used in real OS kernels.
+
+```python
+# Page Fault Handler with Clock (Second-Chance) Eviction.
+# Run: python page_fault_clock.py
+
+
+class PageFaultHandler:
+    """
+    OS page fault handler using the Clock eviction algorithm.
+    Clock: give each page a 'reference bit'; when eviction is needed,
+    skip pages whose reference bit is 1 (clear it to 0 instead).
+    Evict the first page found with reference bit = 0.
+    """
+
+    def __init__(self, num_frames: int, num_pages: int):
+        # Each frame stores: {page, ref_bit, dirty_bit}
+        self.frames     = [{"page": -1, "ref": False, "dirty": False}
+                           for _ in range(num_frames)]
+        self.page_table = [{"valid": False, "frame": -1}
+                           for _ in range(num_pages)]
+        self.clock_hand = 0
+        self.faults     = 0
+        self.accesses   = 0
+
+    def _clock_evict(self) -> int:
+        """Return the index of the frame to evict using the clock algorithm."""
+        while True:
+            f = self.frames[self.clock_hand]
+            if not f["ref"]:
+                victim = self.clock_hand
+                self.clock_hand = (self.clock_hand + 1) % len(self.frames)
+                return victim
+            # Second chance: clear reference bit and advance
+            f["ref"] = False
+            self.clock_hand = (self.clock_hand + 1) % len(self.frames)
+
+    def access(self, page: int, write: bool = False):
+        self.accesses += 1
+        pt = self.page_table[page]
+
+        if pt["valid"]:
+            # Hit: set reference bit (page was just used — don't evict it soon)
+            f        = self.frames[pt["frame"]]
+            f["ref"] = True
+            if write:
+                f["dirty"] = True
+            return
+
+        # PAGE FAULT
+        self.faults += 1
+
+        # Find a free frame, or evict via clock
+        free = next((i for i, f in enumerate(self.frames) if f["page"] == -1), -1)
+
+        if free != -1:
+            target = free
+            print(f"  [FAULT #{self.faults}] page {page} -> free frame {target}")
+        else:
+            target      = self._clock_evict()
+            evict_page  = self.frames[target]["page"]
+            wb          = " (write-back)" if self.frames[target]["dirty"] else ""
+            print(f"  [FAULT #{self.faults}] evict page {evict_page}{wb}"
+                  f" -> load page {page} into frame {target}")
+            self.page_table[evict_page].update({"valid": False, "frame": -1})
+
+        self.frames[target] = {"page": page, "ref": True, "dirty": write}
+        pt.update({"valid": True, "frame": target})
+
+    def stats(self):
+        rate = self.faults / self.accesses * 100 if self.accesses else 0
+        print(f"\nAccesses: {self.accesses} | Faults: {self.faults} | "
+              f"Rate: {rate:.1f}%")
+
+
+handler = PageFaultHandler(num_frames=3, num_pages=8)
+refs    = [0, 1, 2, 3, 0, 1, 4, 0, 1, 2, 3, 4]
+
+print("=== Page Fault Handler: Clock Eviction (3 frames) ===")
+for p in refs:
+    handler.access(p)
+
+handler.stats()
+```
+
+---
+
 ## 10. Key Takeaways
 
 - A **page fault** fires when the MMU sees valid bit = 0 in the page table — it is a **normal interrupt**, not an error

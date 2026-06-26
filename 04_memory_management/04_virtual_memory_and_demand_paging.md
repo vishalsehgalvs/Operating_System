@@ -327,6 +327,266 @@ This is why OSes invest heavily in smart page replacement algorithms and working
 
 ---
 
+## 10. Code Examples
+
+> Working code that demonstrates Virtual Memory and Demand Paging in practice.
+
+### C++ — Simple Version
+Simulate demand paging — all pages start on disk, and the OS loads them into RAM only when accessed (lazy loading with FIFO eviction).
+
+```cpp
+// Demand Paging Simulation — pages loaded from disk only when accessed
+// Compile: g++ -std=c++17 demand_paging.cpp -o demand_paging
+
+#include <iostream>
+#include <vector>
+#include <set>
+using namespace std;
+
+const int NUM_FRAMES = 3;  // physical RAM can hold 3 pages at most
+const int NUM_PAGES  = 8;  // process has 8 virtual pages (all start on disk)
+
+// valid[page] = true means page is currently in RAM; false means it's on disk
+bool valid[NUM_PAGES] = {};  // all false at start (demand paging: nothing pre-loaded)
+
+// FIFO queue: tracks which page was loaded first (front = oldest = evict next)
+vector<int> fifoQueue;
+int pageFaults = 0;
+
+// Called by the OS when a page fault occurs — loads page from disk into RAM
+void loadPage(int page) {
+    pageFaults++;
+    cout << "  [Page Fault #" << pageFaults << "] Page " << page
+         << " not in RAM — loading from disk\n";
+
+    if ((int)fifoQueue.size() < NUM_FRAMES) {
+        // Free frame available: just load
+        fifoQueue.push_back(page);
+    } else {
+        // No free frames: evict the oldest page (FIFO)
+        int evict = fifoQueue.front();
+        fifoQueue.erase(fifoQueue.begin());
+        valid[evict] = false;
+        cout << "    Evicted page " << evict << " to make room\n";
+        fifoQueue.push_back(page);
+    }
+    valid[page] = true;
+
+    cout << "    RAM now: [";
+    for (int i = 0; i < (int)fifoQueue.size(); i++)
+        cout << (i ? ", " : "") << fifoQueue[i];
+    cout << "]\n";
+}
+
+void accessPage(int page) {
+    cout << "Access page " << page << ": ";
+    if (valid[page]) {
+        cout << "HIT\n";
+    } else {
+        cout << "MISS\n";
+        loadPage(page);
+    }
+}
+
+int main() {
+    // Reference string: the sequence of pages this process accesses over time
+    vector<int> refs = {0, 1, 2, 3, 0, 1, 4, 0, 1, 2, 3, 4};
+
+    cout << "=== Demand Paging (" << NUM_FRAMES << " frames, "
+         << NUM_PAGES << " virtual pages) ===\n\n";
+
+    for (int page : refs)
+        accessPage(page);
+
+    cout << "\nTotal: " << pageFaults << " page faults / "
+         << refs.size() << " accesses"
+         << " (" << (100.0*pageFaults/refs.size()) << "% fault rate)\n";
+    return 0;
+}
+// Page faults: 9 out of 12 accesses (pages 0,1 hit twice at the end)
+```
+
+### C++ — Medium / LeetCode Style
+Simulate demand paging and compute **Effective Access Time (EAT)** — the formula that shows how devastating even a 1% fault rate is.
+
+```cpp
+// Demand Paging + EAT: EAT = (1-p)*mem_time + p*fault_time
+// Compile: g++ -std=c++17 eat.cpp -o eat
+
+#include <iostream>
+#include <vector>
+#include <set>
+#include <iomanip>
+using namespace std;
+
+// Run FIFO demand paging simulation; return page fault count
+int simulateFIFO(const vector<int>& refs, int frames) {
+    set<int>    inRAM;
+    vector<int> queue;   // FIFO order
+    int faults = 0;
+
+    for (int page : refs) {
+        if (inRAM.count(page)) continue;   // hit
+        faults++;
+        if ((int)queue.size() == frames) {
+            inRAM.erase(queue.front());
+            queue.erase(queue.begin());
+        }
+        queue.push_back(page);
+        inRAM.insert(page);
+    }
+    return faults;
+}
+
+// Compute and print EAT for a given fault rate
+void printEAT(double faultRate,
+              double memTimeNs   = 100.0,
+              double faultTimeNs = 8'000'000.0) {
+    double eat = (1.0 - faultRate) * memTimeNs + faultRate * faultTimeNs;
+    cout << fixed << setprecision(1);
+    cout << "  p = " << faultRate * 100 << "%"
+         << "  | EAT = " << eat << " ns"
+         << "  | slowdown = " << eat / memTimeNs << "x\n";
+}
+
+int main() {
+    vector<int> refs   = {0, 1, 2, 3, 0, 1, 4, 0, 1, 2, 3, 4};
+    int         frames = 3;
+
+    int faults = simulateFIFO(refs, frames);
+    double p   = (double)faults / refs.size();
+
+    cout << "=== Demand Paging Stats ===\n";
+    cout << "Frames: " << frames << "  |  Faults: " << faults
+         << "/" << refs.size() << "  |  Rate: " << p*100 << "%\n\n";
+
+    cout << "=== EAT Analysis (mem=100ns, fault=8ms) ===\n";
+    // Show EAT for various fault rates to illustrate the performance cliff
+    for (double rate : {0.0, 0.001, 0.01, 0.1, p}) {
+        printEAT(rate);
+    }
+
+    cout << "\nKey insight: even 1% fault rate -> "
+         << (1 - 0.01) * 100 + 0.01 * 8'000'000 / 100 << "x slower than zero faults\n";
+    return 0;
+}
+// p=0.0%   | EAT =     100.0 ns | slowdown = 1.0x
+// p=0.1%   | EAT =    8099.9 ns | slowdown = 81.0x
+// p=1.0%   | EAT =   79100.0 ns | slowdown = 791.0x
+// p=10.0%  | EAT =  800090.0 ns | slowdown = 8000.9x
+```
+
+### Python — Simple Version
+Simulate demand paging step by step — show exactly when each page fault occurs and what gets evicted.
+
+```python
+# Demand Paging Simulation — lazy page loading with FIFO eviction.
+# Run: python demand_paging.py
+
+NUM_FRAMES = 3   # physical RAM can hold 3 pages
+
+
+def simulate_demand_paging(refs: list[int], num_frames: int):
+    in_ram    : set[int]  = set()
+    fifo_queue: list[int] = []   # oldest page is at index 0
+    faults = 0
+
+    print(f"{'Ref':<5} {'Result':<12} {'RAM contents'}")
+    print("-" * 35)
+
+    for page in refs:
+        if page in in_ram:
+            result = "HIT"
+        else:
+            result = "FAULT"
+            faults += 1
+
+            if len(fifo_queue) == num_frames:
+                # No free frames — evict the oldest (FIFO)
+                evicted = fifo_queue.pop(0)
+                in_ram.discard(evicted)
+
+            fifo_queue.append(page)
+            in_ram.add(page)
+
+        print(f"pg {page:<2}  {result:<12} {sorted(in_ram)}")
+
+    return faults
+
+
+refs   = [0, 1, 2, 3, 0, 1, 4, 0, 1, 2, 3, 4]
+faults = simulate_demand_paging(refs, NUM_FRAMES)
+
+print(f"\nPage faults : {faults} / {len(refs)}")
+print(f"Fault rate  : {faults/len(refs)*100:.1f}%")
+# 9 faults out of 12 accesses
+```
+
+### Python — Medium Level
+Compute **Effective Access Time (EAT)** for different fault rates and show the performance cliff.
+
+```python
+# Demand Paging + EAT analysis.
+# EAT = (1 - p) * mem_time + p * fault_time
+# Run: python eat.py
+
+
+def simulate_fifo(refs: list[int], frames: int) -> int:
+    """Run FIFO page replacement; return total page fault count."""
+    in_ram     = set()
+    fifo_queue = []
+    faults     = 0
+
+    for page in refs:
+        if page in in_ram:
+            continue
+        faults += 1
+        if len(fifo_queue) == frames:
+            evicted = fifo_queue.pop(0)
+            in_ram.discard(evicted)
+        fifo_queue.append(page)
+        in_ram.add(page)
+
+    return faults
+
+
+def eat(fault_rate: float,
+        mem_ns:   float = 100.0,
+        fault_ns: float = 8_000_000.0) -> float:
+    """Effective Access Time formula."""
+    return (1 - fault_rate) * mem_ns + fault_rate * fault_ns
+
+
+def main():
+    refs   = [0, 1, 2, 3, 0, 1, 4, 0, 1, 2, 3, 4]
+    frames = 3
+
+    faults = simulate_fifo(refs, frames)
+    p      = faults / len(refs)
+
+    print("=== Demand Paging Simulation ===")
+    print(f"Reference string length : {len(refs)}")
+    print(f"Frames                  : {frames}")
+    print(f"Page faults             : {faults}  ({p*100:.1f}% rate)")
+
+    print("\n=== Effective Access Time (mem=100ns, page fault=8ms) ===")
+    print(f"{'Fault rate':<15} {'EAT':>12}  {'Slowdown':>10}")
+    print("-" * 42)
+
+    for rate in [0, 0.001, 0.01, 0.1, p]:
+        e        = eat(rate)
+        slowdown = e / 100.0
+        print(f"{rate*100:>8.1f}%      {e:>12,.0f} ns  {slowdown:>9.1f}x")
+
+    print("\n=> Even 0.1% fault rate makes memory access ~80x slower!")
+    print("=> Locality of reference keeps real fault rates near 0 in practice.")
+
+
+main()
+```
+
+---
+
 ## 11. Key Takeaways
 
 - **Virtual memory** = abstraction that lets processes use more address space than physical RAM by backing overflow pages with disk (swap)

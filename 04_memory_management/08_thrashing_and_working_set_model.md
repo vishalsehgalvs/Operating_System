@@ -242,6 +242,224 @@ Many modern OSes use a **hybrid** — PFF for normal frame adjustment, Working S
 
 ---
 
+## 9. Code Examples
+
+> Working code that demonstrates the Working Set Model and thrashing prevention in practice.
+
+### C++ — Simple Version
+Compute the working set W(t, Δ) at each time step — the set of distinct pages referenced in the last Δ time units.
+
+```cpp
+// Working Set Model: compute W(t, delta) for each time step
+// Compile: g++ -std=c++17 working_set.cpp -o working_set
+
+#include <iostream>
+#include <vector>
+#include <set>
+#include <algorithm>
+using namespace std;
+
+// Compute working set W(t, delta) = distinct pages in refs[t-delta .. t]
+// 't' is the current reference index, delta is the window size
+set<int> workingSet(const vector<int>& refs, int t, int delta) {
+    int start = max(0, t - delta + 1);  // window: [start, t]
+    return set<int>(refs.begin() + start, refs.begin() + t + 1);
+}
+
+int main() {
+    // Reference string: page accesses over time (each index = one time unit)
+    vector<int> refs = {1, 2, 1, 3, 4, 1, 5, 2, 1, 3, 1, 2};
+    int delta = 4;  // working set window size
+
+    cout << "Reference string: ";
+    for (int p : refs) cout << p << " ";
+    cout << "\nWindow (delta) = " << delta << "\n\n";
+
+    cout << "Time | Page | Working Set W(t," << delta << ")  | WSS\n";
+    cout << "-----|------|----------------------|-----\n";
+
+    for (int t = 0; t < (int)refs.size(); t++) {
+        set<int> ws = workingSet(refs, t, delta);
+        cout << "  " << t << "  |   " << refs[t] << "  | {";
+        bool first = true;
+        for (int p : ws) { if (!first) cout << ","; cout << p; first = false; }
+        cout << "}";
+        // Pad to fixed width
+        cout << string(max(0, 20 - (int)(ws.size()*2)), ' ');
+        cout << "  | " << ws.size() << "\n";
+    }
+
+    cout << "\nKey insight: WSS = how many frames this process NEEDS right now\n";
+    cout << "If total WSS > available frames -> thrashing!\n";
+    return 0;
+}
+```
+
+### C++ — Medium / LeetCode Style
+Simulate two processes competing for a shared RAM pool; show how total WSS vs available frames predicts thrashing.
+
+```cpp
+// Thrashing Simulation: two processes, track total WSS vs available frames
+// Compile: g++ -std=c++17 thrashing.cpp -o thrashing
+
+#include <iostream>
+#include <vector>
+#include <set>
+#include <algorithm>
+#include <iomanip>
+using namespace std;
+
+// Compute Working Set Size (number of distinct pages in last delta accesses)
+int wss(const vector<int>& refs, int t, int delta) {
+    int start = max(0, t - delta + 1);
+    set<int> ws(refs.begin() + start, refs.begin() + t + 1);
+    return (int)ws.size();
+}
+
+// Simulate demand paging for a process; return page fault count up to time t
+// using a fixed frame count 'frames' and FIFO eviction
+int pageFaultsSoFar(const vector<int>& refs, int frames, int upTo) {
+    vector<int> queue;
+    set<int>    inRAM;
+    int faults = 0;
+    for (int i = 0; i <= upTo && i < (int)refs.size(); i++) {
+        int page = refs[i];
+        if (inRAM.count(page)) continue;
+        faults++;
+        if ((int)queue.size() == frames) {
+            inRAM.erase(queue.front());
+            queue.erase(queue.begin());
+        }
+        queue.push_back(page);
+        inRAM.insert(page);
+    }
+    return faults;
+}
+
+int main() {
+    // Two processes with different access patterns
+    vector<int> p1refs = {1, 2, 1, 3, 1, 2, 1, 4, 1, 2, 1, 3};
+    vector<int> p2refs = {5, 6, 7, 5, 6, 8, 5, 6, 7, 9, 5, 6};
+    int delta        = 4;
+    int totalFrames  = 6;  // total physical frames available
+
+    cout << "Total available frames: " << totalFrames << "\n";
+    cout << "Window (delta):         " << delta << "\n\n";
+
+    cout << setw(4) << "t"
+         << setw(8) << "P1 WSS"
+         << setw(8) << "P2 WSS"
+         << setw(12) << "Total WSS"
+         << setw(12) << "Status\n";
+    cout << string(44, '-') << "\n";
+
+    int len = min(p1refs.size(), p2refs.size());
+    for (int t = 0; t < (int)len; t++) {
+        int w1    = wss(p1refs, t, delta);
+        int w2    = wss(p2refs, t, delta);
+        int total = w1 + w2;
+        bool thrashing = total > totalFrames;
+        cout << setw(4) << t
+             << setw(8) << w1
+             << setw(8) << w2
+             << setw(12) << total
+             << setw(12) << (thrashing ? "THRASHING!" : "OK") << "\n";
+    }
+
+    cout << "\nPrevention rule: if total WSS > available frames,\n"
+         << "suspend one process entirely rather than let both thrash.\n";
+    return 0;
+}
+```
+
+### Python — Simple Version
+Compute and display the working set W(t, Δ) at each time step for a single process.
+
+```python
+# Working Set Model — compute W(t, delta) at each time step.
+# Run: python working_set.py
+
+
+def working_set(refs: list[int], t: int, delta: int) -> set[int]:
+    """
+    W(t, delta) = distinct pages referenced in refs[t-delta+1 .. t]
+    This is the 'hot set' — what the process is actively using RIGHT NOW.
+    """
+    start = max(0, t - delta + 1)
+    return set(refs[start : t + 1])
+
+
+def main():
+    refs  = [1, 2, 1, 3, 4, 1, 5, 2, 1, 3, 1, 2]
+    delta = 4   # working set window: look back at last 4 accesses
+
+    print(f"Reference string : {refs}")
+    print(f"Window (delta)   : {delta}")
+    print()
+    print(f"{'t':<4} {'Page':<6} {'Working Set W(t,Δ)':<22} {'WSS':>4}")
+    print("-" * 38)
+
+    for t, page in enumerate(refs):
+        ws  = working_set(refs, t, delta)
+        wss = len(ws)
+        print(f"{t:<4} {page:<6} {str(sorted(ws)):<22} {wss:>4}")
+
+    print()
+    print("WSS = Working Set Size = how many frames this process NEEDS now")
+    print("If total WSS of all processes > RAM frames -> thrashing risk!")
+
+
+main()
+```
+
+### Python — Medium Level
+Simulate two processes sharing a RAM pool; use WSS to detect and prevent thrashing by suspending the lower-priority process.
+
+```python
+# Thrashing prevention using Working Set Model.
+# Run: python thrashing.py
+
+
+def working_set_size(refs: list[int], t: int, delta: int) -> int:
+    """Return the number of distinct pages in the last delta accesses."""
+    start = max(0, t - delta + 1)
+    return len(set(refs[start : t + 1]))
+
+
+def simulate_thrashing(p1_refs: list[int], p2_refs: list[int],
+                        total_frames: int, delta: int):
+    """
+    At each time step, check if total WSS of both processes exceeds
+    available frames. If so, flag as thrashing.
+    """
+    print(f"Total frames: {total_frames}  |  Window (delta): {delta}\n")
+    print(f"{'t':<4} {'P1 WSS':<8} {'P2 WSS':<8} {'Total':>7}  Status")
+    print("-" * 42)
+
+    length = min(len(p1_refs), len(p2_refs))
+    for t in range(length):
+        w1    = working_set_size(p1_refs, t, delta)
+        w2    = working_set_size(p2_refs, t, delta)
+        total = w1 + w2
+        status = "THRASHING — suspend a process!" if total > total_frames else "OK"
+        print(f"{t:<4} {w1:<8} {w2:<8} {total:>7}  {status}")
+
+    print()
+    print("Solution: if total_WSS > frames, suspend the lowest-priority")
+    print("process entirely (reclaim ALL its frames) rather than letting")
+    print("both processes thrash with a few frames each.")
+
+
+# Process 1: accesses a small, stable working set (pages 1,2,3)
+p1 = [1, 2, 1, 3, 1, 2, 1, 3, 1, 2, 1, 3]
+# Process 2: frequently introduces new pages — expanding working set
+p2 = [4, 5, 6, 4, 7, 5, 8, 4, 9, 5, 6, 4]
+
+simulate_thrashing(p1, p2, total_frames=6, delta=4)
+```
+
+---
+
 ## 10. Key Takeaways
 
 - **Thrashing** = system spends more time swapping pages than executing code; CPU utilization collapses, disk is maxed

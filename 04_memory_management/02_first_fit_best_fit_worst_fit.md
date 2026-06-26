@@ -371,6 +371,290 @@ flowchart TD
 
 ---
 
+## 8. Code Examples
+
+> Working code that demonstrates First Fit, Best Fit, and Worst Fit memory allocation in practice.
+
+### C++ — Simple Version
+Implement all three strategies and show which hole each picks for a single allocation request.
+
+```cpp
+// Memory Allocation: First Fit, Best Fit, Worst Fit
+// Compile: g++ -std=c++17 allocation.cpp -o allocation
+
+#include <iostream>
+#include <vector>
+#include <climits>
+using namespace std;
+
+// First Fit: pick the FIRST hole large enough — scan once, stop early
+int firstFit(const vector<int>& holes, int request) {
+    for (int i = 0; i < (int)holes.size(); i++)
+        if (holes[i] >= request) return i;
+    return -1;
+}
+
+// Best Fit: pick the SMALLEST hole that still fits
+// Minimizes leftover space per allocation, but creates many tiny fragments
+int bestFit(const vector<int>& holes, int request) {
+    int chosen = -1, best = INT_MAX;
+    for (int i = 0; i < (int)holes.size(); i++)
+        if (holes[i] >= request && holes[i] < best)
+            { chosen = i; best = holes[i]; }
+    return chosen;
+}
+
+// Worst Fit: pick the LARGEST hole available
+// Leaves biggest leftovers in theory; quickly consumes large blocks in practice
+int worstFit(const vector<int>& holes, int request) {
+    int chosen = -1, worst = -1;
+    for (int i = 0; i < (int)holes.size(); i++)
+        if (holes[i] >= request && holes[i] > worst)
+            { chosen = i; worst = holes[i]; }
+    return chosen;
+}
+
+int main() {
+    // Free memory holes in address order (sizes in KB)
+    vector<int> holes = {100, 500, 200, 300, 600};
+    int request = 250;  // process needs 250 KB
+
+    cout << "Free holes (KB): ";
+    for (int i = 0; i < (int)holes.size(); i++)
+        cout << "[H" << i+1 << ":" << holes[i] << "] ";
+    cout << "\nRequest: " << request << " KB\n\n";
+
+    auto report = [&](const string& name, int idx) {
+        if (idx == -1) {
+            cout << name << " -> No fit found!\n";
+        } else {
+            cout << name << " -> H" << idx+1
+                 << " (" << holes[idx] << " KB)"
+                 << " | leftover = " << holes[idx] - request << " KB\n";
+        }
+    };
+
+    report("First Fit ", firstFit(holes, request));
+    report("Best Fit  ", bestFit(holes, request));
+    report("Worst Fit ", worstFit(holes, request));
+
+    return 0;
+}
+// Output:
+// Free holes (KB): [H1:100] [H2:500] [H3:200] [H4:300] [H5:600]
+// Request: 250 KB
+//
+// First Fit  -> H2 (500 KB) | leftover = 250 KB
+// Best Fit   -> H4 (300 KB) | leftover =  50 KB
+// Worst Fit  -> H5 (600 KB) | leftover = 350 KB
+```
+
+### C++ — Medium / LeetCode Style
+Simulate a full sequence of allocation requests; compare failures and fragmentation across all three strategies.
+
+```cpp
+// Memory Allocation Simulator: sequence of requests, fragmentation analysis
+// Compile: g++ -std=c++17 alloc_sim.cpp -o alloc_sim
+
+#include <iostream>
+#include <vector>
+#include <numeric>
+#include <climits>
+using namespace std;
+
+enum Strategy { FIRST_FIT, BEST_FIT, WORST_FIT };
+
+// Allocate 'request' KB from holes in-place using the chosen strategy.
+// Returns true on success, false if no hole fits.
+bool allocate(vector<int>& holes, int request, Strategy s) {
+    int chosen = -1;
+
+    if (s == FIRST_FIT) {
+        for (int i = 0; i < (int)holes.size(); i++)
+            if (holes[i] >= request) { chosen = i; break; }
+
+    } else if (s == BEST_FIT) {
+        int best = INT_MAX;
+        for (int i = 0; i < (int)holes.size(); i++)
+            if (holes[i] >= request && holes[i] < best)
+                { best = holes[i]; chosen = i; }
+
+    } else {  // WORST_FIT
+        int worst = -1;
+        for (int i = 0; i < (int)holes.size(); i++)
+            if (holes[i] >= request && holes[i] > worst)
+                { worst = holes[i]; chosen = i; }
+    }
+
+    if (chosen == -1) return false;
+    holes[chosen] -= request;
+    if (holes[chosen] == 0) holes.erase(holes.begin() + chosen);
+    return true;
+}
+
+void simulate(const string& name, vector<int> holes,
+              const vector<int>& requests, Strategy s) {
+    cout << "=== " << name << " ===\n";
+    int failures = 0;
+    for (int req : requests) {
+        bool ok = allocate(holes, req, s);
+        if (!ok) failures++;
+        cout << "  " << req << " KB -> " << (ok ? "OK" : "FAILED") << "\n";
+    }
+    int frag = accumulate(holes.begin(), holes.end(), 0);
+    cout << "  Remaining: ";
+    for (int h : holes) cout << h << " ";
+    cout << "(" << frag << " KB fragmented, "
+         << failures << " failures)\n\n";
+}
+
+int main() {
+    vector<int> holes    = {100, 500, 200, 300, 600};
+    vector<int> requests = {115, 500, 358, 200, 375};
+
+    cout << "Holes:    "; for (int h : holes)    cout << h << " "; cout << "\n";
+    cout << "Requests: "; for (int r : requests) cout << r << " "; cout << "\n\n";
+
+    simulate("First Fit", holes, requests, FIRST_FIT);
+    simulate("Best Fit",  holes, requests, BEST_FIT);
+    simulate("Worst Fit", holes, requests, WORST_FIT);
+    return 0;
+}
+```
+
+### Python — Simple Version
+Implement all three strategies in readable Python; show which hole each picks.
+
+```python
+# Memory Allocation: First Fit, Best Fit, Worst Fit
+# Run: python allocation.py
+
+
+def first_fit(holes: list[int], request: int) -> int:
+    """Pick the first hole that is large enough (stop scanning early)."""
+    for i, hole in enumerate(holes):
+        if hole >= request:
+            return i
+    return -1
+
+
+def best_fit(holes: list[int], request: int) -> int:
+    """Pick the smallest hole that still fits (minimise internal waste)."""
+    chosen, smallest = -1, float('inf')
+    for i, hole in enumerate(holes):
+        if hole >= request and hole < smallest:
+            chosen, smallest = i, hole
+    return chosen
+
+
+def worst_fit(holes: list[int], request: int) -> int:
+    """Pick the largest hole available (leave biggest leftover)."""
+    chosen, largest = -1, -1
+    for i, hole in enumerate(holes):
+        if hole >= request and hole > largest:
+            chosen, largest = i, hole
+    return chosen
+
+
+def main():
+    holes   = [100, 500, 200, 300, 600]  # free memory holes in KB, address order
+    request = 250                         # process needs 250 KB
+
+    print(f"Free holes (KB) : {holes}")
+    print(f"Request         : {request} KB\n")
+
+    for name, fn in [("First Fit", first_fit),
+                     ("Best Fit ", best_fit),
+                     ("Worst Fit", worst_fit)]:
+        idx = fn(holes, request)
+        if idx == -1:
+            print(f"{name} -> No fit found!")
+        else:
+            leftover = holes[idx] - request
+            print(f"{name} -> Hole[{idx+1}] = {holes[idx]} KB  "
+                  f"| leftover = {leftover} KB")
+
+
+main()
+# Output:
+# Free holes (KB) : [100, 500, 200, 300, 600]
+# Request         : 250 KB
+#
+# First Fit -> Hole[2] = 500 KB  | leftover = 250 KB
+# Best Fit  -> Hole[4] = 300 KB  | leftover =  50 KB
+# Worst Fit -> Hole[5] = 600 KB  | leftover = 350 KB
+```
+
+### Python — Medium Level
+Simulate a sequence of allocations; compare fragmentation and failure counts across strategies.
+
+```python
+# Memory Allocation Simulator — fragmentation comparison across strategies
+# Run: python alloc_sim.py
+
+import copy
+
+
+def allocate(holes: list[int], request: int, strategy: str) -> bool:
+    """Allocate 'request' KB in-place. Returns True on success."""
+    chosen = -1
+
+    if strategy == "first":
+        for i, h in enumerate(holes):
+            if h >= request:
+                chosen = i
+                break
+
+    elif strategy == "best":
+        best_size = float('inf')
+        for i, h in enumerate(holes):
+            if h >= request and h < best_size:
+                chosen, best_size = i, h
+
+    elif strategy == "worst":
+        worst_size = -1
+        for i, h in enumerate(holes):
+            if h >= request and h > worst_size:
+                chosen, worst_size = i, h
+
+    if chosen == -1:
+        return False
+
+    holes[chosen] -= request
+    if holes[chosen] == 0:
+        holes.pop(chosen)
+    return True
+
+
+def simulate(strategy: str, initial_holes: list[int], requests: list[int]):
+    holes    = copy.copy(initial_holes)
+    failures = 0
+
+    print(f"\n=== {strategy.title()} Fit ===")
+    for req in requests:
+        ok = allocate(holes, req, strategy)
+        if not ok:
+            failures += 1
+        print(f"  {req:4d} KB -> {'OK' if ok else 'FAILED'}")
+
+    frag = sum(holes)
+    print(f"  Remaining holes    : {holes}")
+    print(f"  Total fragmentation: {frag} KB in {len(holes)} pieces")
+    print(f"  Failures           : {failures}")
+
+
+initial_holes = [100, 500, 200, 300, 600]
+requests      = [115, 500, 358, 200, 375]
+
+print(f"Initial holes : {initial_holes}")
+print(f"Requests      : {requests}")
+
+for strat in ["first", "best", "worst"]:
+    simulate(strat, initial_holes, requests)
+```
+
+---
+
 ## 9. Key Takeaways
 
 - **Contiguous allocation** places each process in one unbroken stretch of RAM

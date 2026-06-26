@@ -416,6 +416,255 @@ OS can now allocate the 2KB hole to a new process.
 
 ---
 
+## 11. Code Examples
+
+> Working code that demonstrates Memory Management and Address Binding in practice.
+
+### C++ — Simple Version
+Simulate the MMU translating logical addresses to physical using base and limit registers; show compile-time vs load-time vs runtime binding.
+
+```cpp
+// MMU Address Translation: logical address → physical address
+// Compile: g++ -std=c++17 mmu.cpp -o mmu
+
+#include <iostream>
+using namespace std;
+
+// The MMU holds two hardware registers per process:
+//   base  = where this process starts in physical RAM
+//   limit = the maximum size of this process's address space
+struct MMU {
+    int base;
+    int limit;
+};
+
+// Translate logical address to physical.
+// Returns -1 if the access is out-of-bounds (triggers a hardware trap).
+int translate(const MMU& mmu, int logical) {
+    // Hardware protection check — runs on every single memory access
+    if (logical < 0 || logical >= mmu.limit)
+        return -1;   // OS receives a trap and sends SIGSEGV to the process
+    // The actual translation: just add the base register value
+    return mmu.base + logical;
+}
+
+int main() {
+    // OS loaded Process P1 at physical address 2000 with an address space of 1000 bytes
+    MMU p1 = {2000, 1000};
+
+    cout << "Process P1: base=" << p1.base << ", limit=" << p1.limit << "\n\n";
+
+    // Compile-time binding: address is fixed in the binary at compile time
+    // (only works if process always loads at the same physical address — embedded)
+    cout << "[Compile-time] Logical   0 -> Physical " << translate(p1, 0)   << "\n";
+
+    // Load-time binding: OS assigns the base when program is loaded; fixed after
+    // (relocatable but cannot move after loading)
+    cout << "[Load-time]    Logical 500 -> Physical " << translate(p1, 500) << "\n";
+
+    // Execution-time binding: MMU hardware translates on EVERY memory access
+    // (allows relocation mid-execution — all modern OSes use this)
+    cout << "[Runtime]      Logical 999 -> Physical " << translate(p1, 999) << "\n";
+
+    // Out-of-bounds: logical >= limit triggers hardware trap → OS kills process
+    int bad = translate(p1, 1500);
+    if (bad == -1)
+        cout << "[PROTECTION]   Logical 1500 -> SEGFAULT (exceeds limit=1000)\n";
+
+    return 0;
+}
+// Output:
+// [Compile-time] Logical   0 -> Physical 2000
+// [Load-time]    Logical 500 -> Physical 2500
+// [Runtime]      Logical 999 -> Physical 2999
+// [PROTECTION]   Logical 1500 -> SEGFAULT (exceeds limit=1000)
+```
+
+### C++ — Medium / LeetCode Style
+Simulate multiple processes with separate address spaces; prove isolation and demonstrate swapping (requires execution-time binding).
+
+```cpp
+// Multi-process MMU: address space isolation + swapping demo
+// Compile: g++ -std=c++17 mmu_multi.cpp -o mmu_multi
+
+#include <iostream>
+#include <vector>
+#include <string>
+#include <iomanip>
+using namespace std;
+
+struct Process {
+    string name;
+    int    base;
+    int    limit;
+
+    // MMU translation (would be done in hardware on every access)
+    int translate(int logical) const {
+        if (logical < 0 || logical >= limit) return -1;
+        return base + logical;
+    }
+
+    // OS swaps this process out and reloads it at a new physical address.
+    // Execution-time binding: process code is unchanged — MMU handles the rest.
+    void swapTo(int newBase) {
+        cout << "  [SWAP] " << name << " relocated: base "
+             << base << " -> " << newBase << "\n";
+        base = newBase;
+    }
+};
+
+int main() {
+    // Three processes loaded at non-overlapping physical regions
+    vector<Process> procs = {
+        {"P1", 1000, 500},   // P1: physical 1000–1499
+        {"P2", 3000, 800},   // P2: physical 3000–3799
+        {"P3", 5500, 600},   // P3: physical 5500–6099
+    };
+
+    cout << "=== Address Translations ===\n";
+    for (auto& p : procs) {
+        cout << "\n[" << p.name << " base=" << p.base << " limit=" << p.limit << "]\n";
+        for (int la : {0, 100, p.limit - 1, p.limit}) {
+            int pa = p.translate(la);
+            cout << "  Logical " << setw(4) << la << " -> ";
+            if (pa == -1) cout << "SEGFAULT\n";
+            else          cout << "Physical " << pa << "\n";
+        }
+    }
+
+    // Isolation: P1 cannot reach P2's memory (MMU enforces it)
+    cout << "\n=== Isolation Check ===\n";
+    int result = procs[0].translate(2500);  // P1 tries to jump into P2's space
+    cout << "P1 logical 2500 -> "
+         << (result == -1 ? "SEGFAULT (P2 is protected)" : to_string(result)) << "\n";
+
+    // Swapping demo: P1 is moved to physical 9000 mid-execution
+    cout << "\n=== Swapping P1 ===\n";
+    cout << "  Before swap: P1 logical 100 -> Physical " << procs[0].translate(100) << "\n";
+    procs[0].swapTo(9000);
+    cout << "  After swap:  P1 logical 100 -> Physical " << procs[0].translate(100) << "\n";
+    cout << "  (Compile-time or load-time binding would crash here!)\n";
+
+    return 0;
+}
+```
+
+### Python — Simple Version
+Simulate the MMU as a class; translate addresses and demonstrate all three binding types.
+
+```python
+# MMU Address Translation — logical to physical address mapping.
+# Run: python mmu.py
+
+class MMU:
+    """
+    Models the Memory Management Unit (inside the CPU).
+    Every memory access goes through this unit at full hardware speed.
+    """
+    def __init__(self, base: int, limit: int):
+        self.base  = base   # physical start address of this process in RAM
+        self.limit = limit  # size of the process's virtual address space
+
+    def translate(self, logical_addr: int) -> int | None:
+        """
+        Translate a logical address to a physical address.
+        Returns None on out-of-bounds (hardware trap in real CPU).
+        """
+        # Protection check: must happen before every memory read/write
+        if not (0 <= logical_addr < self.limit):
+            return None   # real CPU fires an interrupt → OS sends SIGSEGV
+        return self.base + logical_addr   # the translation is just an addition
+
+
+def main():
+    # OS loaded P1 at physical address 2000, address space = 1000 bytes
+    mmu = MMU(base=2000, limit=1000)
+    print(f"Base  : {mmu.base}")
+    print(f"Limit : {mmu.limit}\n")
+
+    # Compile-time binding: compiler baked the address in — works only at fixed location
+    print(f"[Compile-time] Logical   0 -> Physical {mmu.translate(0)}")
+
+    # Load-time binding: OS chose the base when it loaded the program
+    print(f"[Load-time]    Logical 500 -> Physical {mmu.translate(500)}")
+
+    # Execution-time binding: MMU translates on EVERY access (enables relocation/swapping)
+    print(f"[Runtime]      Logical 999 -> Physical {mmu.translate(999)}")
+
+    # Out-of-bounds → hardware trap → OS terminates the process
+    if mmu.translate(1500) is None:
+        print("[PROTECTION]   Logical 1500 -> SEGFAULT (exceeds limit)")
+
+
+main()
+# Output:
+# [Compile-time] Logical   0 -> Physical 2000
+# [Load-time]    Logical 500 -> Physical 2500
+# [Runtime]      Logical 999 -> Physical 2999
+# [PROTECTION]   Logical 1500 -> SEGFAULT (exceeds limit)
+```
+
+### Python — Medium Level
+Multiple processes with isolation enforcement; demonstrate why swapping requires execution-time binding.
+
+```python
+# Multi-process MMU + swapping demo.
+# Run: python mmu_medium.py
+
+class Process:
+    def __init__(self, name: str, base: int, limit: int):
+        self.name  = name
+        self.base  = base
+        self.limit = limit
+
+    def translate(self, logical: int) -> int | None:
+        """MMU translation: logical → physical with bounds check."""
+        if not (0 <= logical < self.limit):
+            return None
+        return self.base + logical
+
+    def swap_to(self, new_base: int):
+        """
+        OS swaps this process to a new physical location.
+        Execution-time binding: process continues seamlessly because
+        the MMU re-adds the new base on every subsequent access.
+        """
+        print(f"  [SWAP] {self.name}: physical {self.base} -> {new_base}")
+        self.base = new_base
+
+
+def main():
+    processes = [
+        Process("P1", 1000, 500),
+        Process("P2", 3000, 800),
+        Process("P3", 5500, 600),
+    ]
+
+    print("=== Initial Address Translations ===")
+    for proc in processes:
+        for la in [0, 100, proc.limit - 1, proc.limit]:
+            pa = proc.translate(la)
+            status = f"Physical {pa}" if pa is not None else "SEGFAULT"
+            print(f"  {proc.name} logical {la:4d} -> {status}")
+        print()
+
+    print("=== Swapping P1 to physical address 9000 ===")
+    p1 = processes[0]
+    print(f"  Before: P1 logical 100 -> Physical {p1.translate(100)}")
+    p1.swap_to(9000)
+    print(f"  After:  P1 logical 100 -> Physical {p1.translate(100)}")
+    print("  Note: compile-time/load-time binding cannot support this — wrong address!")
+
+    print("\n=== Isolation: P1 cannot touch P2 ===")
+    result = p1.translate(2500)   # P1 limit=500, so 2500 is illegal
+    print(f"  P1 logical 2500 -> {result or 'SEGFAULT (P2 is protected)'}")
+
+
+main()
+```
+
+---
+
 ## 12. Key Takeaways
 
 - **Memory management** allocates, tracks, protects, and deallocates RAM for each running process

@@ -475,6 +475,7 @@ Linux kernel, FreeBSD, LLVM, QEMU — open source OSes drive innovation:
 > Working code that demonstrates future OS trends — AI-powered scheduling with usage prediction and carbon-aware scheduling with grid intensity awareness — in practice.
 
 ### C++ — Simple Version
+
 Simulate an AI-powered OS scheduler: track historical CPU usage per process, predict future usage via moving average, and pre-allocate CPU time slices proportionally.
 
 ```cpp
@@ -580,6 +581,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Carbon-aware scheduler: check simulated grid carbon intensity by hour, run urgent tasks immediately, defer non-urgent tasks to low-carbon time windows.
 
 ```cpp
@@ -686,6 +688,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 AI-powered scheduler: record CPU usage history per process, predict next-tick usage with a moving average, and allocate CPU proportionally.
 
 ```python
@@ -773,6 +776,7 @@ sched.schedule()
 ```
 
 ### Python — Medium Level
+
 Carbon-aware scheduler: check hourly grid carbon intensity, run urgent tasks immediately, defer non-urgent batch jobs to low-carbon windows, force-run before deadlines.
 
 ```python

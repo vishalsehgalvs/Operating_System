@@ -337,6 +337,7 @@ For running many containers across many machines, **Kubernetes** (K8s) orchestra
 > Working code that demonstrates container isolation concepts — PID/network/mount namespaces and cgroup resource enforcement — in practice.
 
 ### C++ — Simple Version
+
 Simulate container namespaces: each container has its own PID namespace (PIDs start at 1 inside), its own network IP, and its own filesystem root.
 
 ```cpp
@@ -443,6 +444,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Simulate cgroups enforcing CPU quotas (throttling) and memory limits (OOM kill) per container.
 
 ```cpp
@@ -552,6 +554,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Simulate container namespaces: isolated PID trees, network IPs, and filesystem roots — while the host sees all real PIDs.
 
 ```python
@@ -638,6 +641,7 @@ runtime.show_host_view()
 ```
 
 ### Python — Medium Level
+
 Simulate cgroups: CPU throttling when a container exceeds its quota, and OOM kill when memory limit is exceeded.
 
 ```python

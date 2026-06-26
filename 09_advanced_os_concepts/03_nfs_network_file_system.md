@@ -345,6 +345,7 @@ sudo mount -t nfs server:/share /mnt/shared   # remount
 > Working code that demonstrates NFS concepts — client-server RPC file access and client-side caching with consistency revalidation — in practice.
 
 ### C++ — Simple Version
+
 Simulate NFS client-server: server exports a directory via RPC-style calls; client mounts it and performs transparent file operations.
 
 ```cpp
@@ -474,6 +475,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 NFS client-side caching with attribute revalidation: client caches file data and version; before using cache it checks the server's current version for consistency.
 
 ```cpp
@@ -594,6 +596,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 NFS client-server simulation: server exposes RPC-style file operations; client mounts the remote directory and accesses files transparently.
 
 ```python
@@ -689,6 +692,7 @@ client1.read('data.csv')   # Error — file is gone
 ```
 
 ### Python — Medium Level
+
 NFS client-side caching with attribute TTL and close-to-open consistency: client revalidates cached data against server version before every use.
 
 ```python

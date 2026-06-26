@@ -423,6 +423,7 @@ Attacker gains higher privileges than authorized:
 > Working code that demonstrates OS security concepts — Unix DAC file permissions and RBAC with audit logging — in practice.
 
 ### C++ — Simple Version
+
 Implement Unix-style Discretionary Access Control: users, groups, file permission bits (rwxrwxrwx), and an access check function.
 
 ```cpp
@@ -533,6 +534,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Implement RBAC (Role-Based Access Control): roles with permissions, users assigned to roles, and a tamper-evident audit log for every access decision.
 
 ```cpp
@@ -644,6 +646,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Unix-style DAC: compute owner/group/other permission bits, then check read/write/execute access for a given user.
 
 ```python
@@ -737,6 +740,7 @@ dac.check_access('carol', 'script.sh',  'x')   # Other x -> ALLOWED
 ```
 
 ### Python — Medium Level
+
 RBAC system: roles with permission sets, multi-role users, resource access check through the user-role-permission chain, and a full audit log.
 
 ```python

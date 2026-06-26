@@ -356,6 +356,7 @@ With hardware-assisted virtualization, **typical overhead is 5–10%** for most 
 > Working code that demonstrates virtual machine and hypervisor concepts — VM lifecycle management and memory overcommitment — in practice.
 
 ### C++ — Simple Version
+
 Simulate a Type 2 hypervisor managing multiple VMs: create, start, pause, snapshot, and restore.
 
 ```cpp
@@ -477,6 +478,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Simulate memory overcommitment: hypervisor tracks more committed guest RAM than physical RAM, then uses balloon driver to reclaim from idle VMs.
 
 ```cpp
@@ -570,6 +572,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Type 2 hypervisor managing VM lifecycle: create, start, pause, snapshot, restore.
 
 ```python
@@ -662,6 +665,7 @@ hv.list_vms()
 ```
 
 ### Python — Medium Level
+
 Memory overcommitment simulation with balloon driver reclamation and duplicate page-sharing detection.
 
 ```python

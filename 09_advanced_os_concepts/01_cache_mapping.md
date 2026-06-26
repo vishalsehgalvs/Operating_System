@@ -329,6 +329,7 @@ Understanding cache mapping helps you write **cache-friendly** code — especial
 > Working code that demonstrates cache mapping — direct mapped, set-associative, and TLB — in practice.
 
 ### C++ — Simple Version
+
 Simulate a direct mapped cache: compute slot index from block address, detect hits and misses.
 
 ```cpp
@@ -399,6 +400,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 N-way set-associative cache with LRU replacement, plus a TLB (Translation Lookaside Buffer) simulation.
 
 ```cpp
@@ -511,6 +513,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Direct mapped cache simulation with hit/miss tracking and statistics.
 
 ```python
@@ -564,6 +567,7 @@ cache.stats()
 ```
 
 ### Python — Medium Level
+
 Set-associative cache with LRU (using `OrderedDict`) plus a fully associative TLB.
 
 ```python

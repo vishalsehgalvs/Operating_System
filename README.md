@@ -92,4 +92,3 @@ threads_and_parallelism/
   03_threads_in_python.md                      # Thread creation and management in Python
   04_parallel_processing_vs_threads.md         # Parallel processing vs threading comparison
 ```
-

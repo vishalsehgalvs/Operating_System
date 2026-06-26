@@ -95,17 +95,6 @@ threads_and_parallelism/
 
 ---
 
-## Format
-
-Every file follows the same format:
-
-- Plain English explanation with real-life analogies
-- Mermaid flow diagrams and ASCII visuals
-- Step-by-step breakdowns and comparison tables
-- Key takeaways at the end
-
----
-
 ## Topics Covered
 
 | #                                              | Topic                                     | Status |

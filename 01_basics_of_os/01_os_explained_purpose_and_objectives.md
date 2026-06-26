@@ -29,12 +29,12 @@ It manages all the resources of a computer system and provides an environment wh
 
 **Common examples:**
 
-| Device         | Operating System          |
-| -------------- | ------------------------- |
-| Laptop/Desktop | Windows, macOS, Linux     |
-| Smartphone     | Android, iOS              |
-| Server         | Linux (Ubuntu, CentOS)    |
-| Embedded       | FreeRTOS, VxWorks         |
+| Device         | Operating System       |
+| -------------- | ---------------------- |
+| Laptop/Desktop | Windows, macOS, Linux  |
+| Smartphone     | Android, iOS           |
+| Server         | Linux (Ubuntu, CentOS) |
+| Embedded       | FreeRTOS, VxWorks      |
 
 ---
 
@@ -69,11 +69,11 @@ flowchart TD
 
 Without an OS, using a computer would be extremely difficult:
 
-| Problem Without OS              | What That Means in Practice                                              |
-| ------------------------------- | ------------------------------------------------------------------------ |
-| Complex hardware interaction    | You'd write low-level code just to display one character on the screen   |
-| No resource management          | Multiple programs would fight over the same memory and crash each other  |
-| Inefficient hardware use        | The CPU would sit idle while waiting for slow devices like hard disks    |
+| Problem Without OS           | What That Means in Practice                                             |
+| ---------------------------- | ----------------------------------------------------------------------- |
+| Complex hardware interaction | You'd write low-level code just to display one character on the screen  |
+| No resource management       | Multiple programs would fight over the same memory and crash each other |
+| Inefficient hardware use     | The CPU would sit idle while waiting for slow devices like hard disks   |
 
 > **The OS solves all of this** — it hides hardware complexity, manages resources fairly, and gives users a simple interface.
 
@@ -139,14 +139,14 @@ Every OS is built with these core goals:
 
 ### Summary Table
 
-| Objective            | What It Means                                   | Real-Life Analogy                    |
-| -------------------- | ----------------------------------------------- | ------------------------------------ |
-| Convenience          | Hide hardware complexity from the user          | Driving a car (no engine knowledge needed) |
-| Efficiency           | Keep CPU and hardware busy at all times         | Chef multitasking while pot boils    |
-| Ability to Evolve    | Add new hardware/features without breaking things | Smartphone software updates         |
-| Resource Management  | Allocate CPU, RAM, disk fairly across programs  | Library managing book loans          |
-| Security & Protection| Prevent unauthorized access between users/apps  | Apartment building with key access  |
-| Error Handling       | Detect and recover from failures gracefully     | Car dashboard warning lights         |
+| Objective             | What It Means                                     | Real-Life Analogy                          |
+| --------------------- | ------------------------------------------------- | ------------------------------------------ |
+| Convenience           | Hide hardware complexity from the user            | Driving a car (no engine knowledge needed) |
+| Efficiency            | Keep CPU and hardware busy at all times           | Chef multitasking while pot boils          |
+| Ability to Evolve     | Add new hardware/features without breaking things | Smartphone software updates                |
+| Resource Management   | Allocate CPU, RAM, disk fairly across programs    | Library managing book loans                |
+| Security & Protection | Prevent unauthorized access between users/apps    | Apartment building with key access         |
+| Error Handling        | Detect and recover from failures gracefully       | Car dashboard warning lights               |
 
 ---
 
@@ -154,14 +154,14 @@ Every OS is built with these core goals:
 
 To achieve its objectives, the OS performs these core functions:
 
-| Function            | Description                                          | Example                              |
-| ------------------- | ---------------------------------------------------- | ------------------------------------ |
-| Process Management  | Create, schedule, and terminate processes            | Running multiple apps at once        |
-| Memory Management   | Allocate and deallocate RAM to programs              | Managing RAM for open applications   |
-| File Management     | Create, delete, read, and write files                | Organizing documents in folders      |
-| Device Management   | Manage input/output devices                          | Connecting printers, keyboards, mice |
+| Function            | Description                                         | Example                              |
+| ------------------- | --------------------------------------------------- | ------------------------------------ |
+| Process Management  | Create, schedule, and terminate processes           | Running multiple apps at once        |
+| Memory Management   | Allocate and deallocate RAM to programs             | Managing RAM for open applications   |
+| File Management     | Create, delete, read, and write files               | Organizing documents in folders      |
+| Device Management   | Manage input/output devices                         | Connecting printers, keyboards, mice |
 | Security Management | Protect system resources and data                   | User login, file permissions         |
-| User Interface      | Provide a way for users to interact with the system  | Graphical desktop, command line      |
+| User Interface      | Provide a way for users to interact with the system | Graphical desktop, command line      |
 
 ```mermaid
 mindmap
@@ -216,12 +216,12 @@ Uses windows, icons, menus, and buttons. Intuitive and beginner-friendly.
 - Right-click a file → click "Delete" → done.
 - No commands to memorize.
 
-| Feature      | CLI                              | GUI                              |
-| ------------ | -------------------------------- | -------------------------------- |
-| Ease of use  | Harder for beginners             | Easy and visual                  |
-| Speed        | Faster for expert users          | Slower (mouse-based)             |
-| Flexibility  | Very high (scriptable)           | Limited to what menus offer      |
-| Common users | Developers, system admins        | General users                    |
+| Feature      | CLI                       | GUI                         |
+| ------------ | ------------------------- | --------------------------- |
+| Ease of use  | Harder for beginners      | Easy and visual             |
+| Speed        | Faster for expert users   | Slower (mouse-based)        |
+| Flexibility  | Very high (scriptable)    | Limited to what menus offer |
+| Common users | Developers, system admins | General users               |
 
 > Most modern OSes (Windows, macOS, Linux distros) offer **both** CLI and GUI.
 
@@ -231,13 +231,13 @@ Uses windows, icons, menus, and buttons. Intuitive and beginner-friendly.
 
 Think of your computer as a **city**, and the OS as its **government and infrastructure**:
 
-| City Component         | OS Equivalent        | What It Does                                              |
-| ---------------------- | -------------------- | --------------------------------------------------------- |
-| Roads & Traffic Lights | Process Management   | Manages flow of processes to prevent conflicts/congestion |
-| Power Grid             | Resource Management  | Distributes CPU/memory to programs based on demand        |
-| Postal Service         | File Management      | Organizes and delivers data using directories and paths   |
-| Police & Security      | Security Management  | Protects data and resources from unauthorized access      |
-| City Hall              | User Interface       | Provides a way for residents (users) to interact          |
+| City Component         | OS Equivalent       | What It Does                                              |
+| ---------------------- | ------------------- | --------------------------------------------------------- |
+| Roads & Traffic Lights | Process Management  | Manages flow of processes to prevent conflicts/congestion |
+| Power Grid             | Resource Management | Distributes CPU/memory to programs based on demand        |
+| Postal Service         | File Management     | Organizes and delivers data using directories and paths   |
+| Police & Security      | Security Management | Protects data and resources from unauthorized access      |
+| City Hall              | User Interface      | Provides a way for residents (users) to interact          |
 
 A well-managed city runs smoothly — a well-designed OS does the same for your computer.
 

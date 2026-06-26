@@ -223,6 +223,7 @@ The kernel's memory allocation data structures must be protected from concurrent
 > Working code that demonstrates process synchronization and race conditions in practice.
 
 ### C++ — Simple Version
+
 Two threads increment a shared counter without sync (shows wrong result), highlighting the race condition.
 
 ```cpp
@@ -264,6 +265,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Correct versions using `std::mutex` and `std::atomic` — both fix the race condition.
 
 ```cpp
@@ -311,6 +313,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Manually simulates interleaving with `time.sleep(0)` to expose the race condition clearly.
 
 ```python
@@ -338,6 +341,7 @@ print(f"Without lock — Expected: {2 * ITERATIONS}, Got: {counter}")
 ```
 
 ### Python — Medium Level
+
 Side-by-side comparison of the broken and fixed versions using `threading.Lock`.
 
 ```python

@@ -371,6 +371,7 @@ All resource types must be satisfiable — if even one type fails, the process c
 > Working code that implements Banker's Algorithm — Safety Check and Resource Request.
 
 ### C++ — Simple Version
+
 Safety Algorithm only — checks if the current state allows all processes to finish (classic textbook example).
 
 ```cpp
@@ -457,6 +458,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Complete Banker's Algorithm with Safety Check + Resource Request — encapsulated in a class.
 
 ```cpp
@@ -564,6 +566,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Safety Algorithm — step-by-step with verbose output showing how Work expands as each process finishes.
 
 ```python
@@ -624,6 +627,7 @@ else:
 ```
 
 ### Python — Medium Level
+
 Complete Banker's Algorithm (Safety + Resource Request) — LeetCode-style clean functions.
 
 ```python

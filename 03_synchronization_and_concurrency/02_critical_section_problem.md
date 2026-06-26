@@ -268,6 +268,7 @@ These are covered in the next topics.
 > Working code that demonstrates Peterson's Algorithm — the classic software solution to the critical section problem.
 
 ### C++ — Simple Version
+
 Conceptual simulation of Peterson's Algorithm showing entry/exit logic for two processes.
 
 ```cpp
@@ -326,6 +327,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Peterson's Algorithm with real `std::thread` — proves correctness under actual concurrency.
 
 ```cpp
@@ -382,6 +384,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Single-threaded walkthrough of Peterson's Algorithm that shows the entry/exit protocol step by step.
 
 ```python
@@ -438,6 +441,7 @@ print("  P0 exited — P1 can now enter")
 ```
 
 ### Python — Medium Level
+
 Uses `threading.Thread` to demonstrate Peterson's Algorithm under real concurrency.
 
 ```python

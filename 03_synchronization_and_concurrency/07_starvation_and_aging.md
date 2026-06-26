@@ -355,6 +355,7 @@ These look similar on the surface but are fundamentally different:
 > Working code that demonstrates priority scheduling causing starvation, then fixing it with aging.
 
 ### C++ — Simple Version
+
 Priority scheduler without aging causes a low-priority process to starve; adding aging prevents it.
 
 ```cpp
@@ -431,6 +432,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Effective priority formula `eff = base - (wait / factor)` — shows how aging factor controls starvation speed.
 
 ```cpp
@@ -504,6 +506,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Clearly shows P3 starving without aging, then getting served once aging kicks in.
 
 ```python
@@ -569,6 +572,7 @@ schedule_with_aging(make_procs(), aging_interval=2)
 ```
 
 ### Python — Medium Level
+
 Effective priority formula with configurable aging factor — shows how the factor trades off fairness vs priority.
 
 ```python

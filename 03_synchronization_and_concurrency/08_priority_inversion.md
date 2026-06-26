@@ -385,6 +385,7 @@ pthread_mutex_init(&mutex, &attr);
 > Working code that demonstrates priority inversion and Priority Inheritance Protocol (PIP) in practice.
 
 ### C++ — Simple Version
+
 Step-by-step simulation showing what goes wrong without PIP, then how PIP prevents the inversion.
 
 ```cpp
@@ -479,6 +480,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Priority inheritance mutex using `std::condition_variable` — lock holder's priority is boosted when a higher-priority thread blocks.
 
 ```cpp
@@ -562,6 +564,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Annotated walkthrough of both scenarios — clearly shows what changes with PIP.
 
 ```python
@@ -643,6 +646,7 @@ with_pip()
 ```
 
 ### Python — Medium Level
+
 `threading`-based simulation with a `PriorityMutex` that boosts the holder's priority on contention.
 
 ```python

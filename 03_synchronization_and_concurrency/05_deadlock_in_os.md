@@ -415,6 +415,7 @@ signal(fork[first]);
 > Working code that demonstrates deadlock formation and detection via cycle detection in a wait-for graph.
 
 ### C++ — Simple Version
+
 Shows the dangerous lock-acquisition order that causes deadlock, then the safe fix using `std::scoped_lock`.
 
 ```cpp
@@ -465,6 +466,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Deadlock detection via DFS cycle detection in a wait-for graph.
 
 ```cpp
@@ -533,6 +535,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Shows the dangerous lock order with `timeout` to avoid actually hanging, then demonstrates the safe fix.
 
 ```python
@@ -590,6 +593,7 @@ t3.start(); t4.start(); t3.join(); t4.join()
 ```
 
 ### Python — Medium Level
+
 Deadlock detection: DFS cycle detection on a wait-for graph — classic graph algorithm applied to OS scheduling.
 
 ```python

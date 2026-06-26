@@ -300,6 +300,7 @@ For the bounded buffer, semaphores are the classic OS-level solution because the
 > Working code that demonstrates the classic bounded-buffer producer-consumer problem.
 
 ### C++ — Simple Version
+
 Circular array buffer with `std::mutex` + two `std::counting_semaphore`s — the textbook semaphore solution.
 
 ```cpp
@@ -361,6 +362,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 `std::condition_variable` + `std::queue` — more expressive; shows the wait predicate pattern clearly.
 
 ```cpp
@@ -419,6 +421,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 `threading.Semaphore` (empty/full) + `threading.Lock` (mutex) — mirrors the C++ semaphore solution exactly.
 
 ```python
@@ -468,6 +471,7 @@ print("All items produced and consumed!")
 ```
 
 ### Python — Medium Level
+
 `queue.Queue` — Python's stdlib bounded buffer that encapsulates all three sync variables internally.
 
 ```python

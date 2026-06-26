@@ -342,6 +342,7 @@ Setting a mutual-exclusion semaphore to 0 by mistake means **no process can ever
 > Working code that demonstrates mutex vs semaphore — ownership semantics vs counting/signaling.
 
 ### C++ — Simple Version
+
 `std::mutex` guards a shared log; `std::counting_semaphore` limits a pool of database connections.
 
 ```cpp
@@ -398,6 +399,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Demonstrates the key difference: mutex ownership (only locker can unlock) vs semaphore signaling (any thread can signal).
 
 ```cpp
@@ -458,6 +460,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 `threading.Lock` for mutual exclusion; `threading.Semaphore` for a connection pool — verbose and beginner-friendly.
 
 ```python
@@ -512,6 +515,7 @@ for t in threads: t.join()
 ```
 
 ### Python — Medium Level
+
 Shows the ownership difference: only the locker should unlock a Lock; any thread can signal a Semaphore.
 
 ```python

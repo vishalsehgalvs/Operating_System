@@ -385,6 +385,7 @@ Only RAID 0 and RAID 10 improve both reads AND writes significantly.
 > Working code that demonstrates RAID striping, mirroring, and XOR parity in practice.
 
 ### C++ — Simple Version
+
 Shows how a file is split (striped) across disks in RAID 0 — block-by-block visualization.
 
 ```cpp
@@ -446,6 +447,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 RAID 5 write with rotating XOR parity, plus recovery of a failed disk.
 
 ```cpp
@@ -534,6 +536,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Visualizes RAID 0 file striping and RAID 1 mirroring side by side.
 
 ```python
@@ -588,6 +591,7 @@ print("RAID 1: one disk fails -> other disk has full copy. Best for boot drives.
 ```
 
 ### Python — Medium Level
+
 RAID 5 write with XOR parity computation, then recovery simulation from a single disk failure.
 
 ```python

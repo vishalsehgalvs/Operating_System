@@ -324,6 +324,7 @@ Linux's **BFQ (Budget Fair Queuing)** provides both low latency and fairness for
 > Working code that demonstrates all 5 disk scheduling algorithms in practice.
 
 ### C++ — Simple Version
+
 FCFS disk scheduling with an ASCII head-movement trace showing the path of the disk head.
 
 ```cpp
@@ -383,6 +384,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 All 5 disk scheduling algorithms (FCFS, SSTF, SCAN, C-SCAN, LOOK, C-LOOK) with total movement comparison.
 
 ```cpp
@@ -533,6 +535,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 SSTF implementation step-by-step, showing which request is chosen at each move.
 
 ```python
@@ -581,6 +584,7 @@ sstf(initial_head=53,
 ```
 
 ### Python — Medium Level
+
 All 5 algorithms implemented and compared, with an ASCII bar chart of total head movement.
 
 ```python

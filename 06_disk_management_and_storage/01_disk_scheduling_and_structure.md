@@ -311,6 +311,7 @@ graph TD
 > Working code that demonstrates disk geometry and access time calculations in practice.
 
 ### C++ — Simple Version
+
 Calculates seek distance between cylinder positions in FCFS order.
 
 ```cpp
@@ -356,6 +357,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Full disk I/O timing model: seek + rotational latency + data transfer per request.
 
 ```cpp
@@ -436,6 +438,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Converts Logical Block Addresses (LBA) to physical Cylinder-Head-Sector (CHS) coordinates.
 
 ```python
@@ -476,6 +479,7 @@ for lba in [0, 1, 31, 32, 127, 128, 500, 1000]:
 ```
 
 ### Python — Medium Level
+
 Compares sequential vs random HDD access patterns, showing how seek time dominates random I/O.
 
 ```python

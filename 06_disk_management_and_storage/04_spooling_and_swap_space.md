@@ -306,6 +306,7 @@ free -h
 > Working code that demonstrates print spooling queues and swap space management in practice.
 
 ### C++ — Simple Version
+
 Print spooler simulation: jobs are added to a FIFO queue and processed one at a time by a daemon.
 
 ```cpp
@@ -377,6 +378,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Swap space manager using LRU eviction: when RAM is full, the least-recently-used process is moved to swap.
 
 ```cpp
@@ -490,6 +492,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Print spooler with a background daemon thread processing jobs from a shared queue.
 
 ```python
@@ -542,6 +545,7 @@ daemon.join()   # wait for all jobs to finish before program exits
 ```
 
 ### Python — Medium Level
+
 Swap space simulator with LRU eviction: tracks RAM and disk swap state across multiple process loads.
 
 ```python

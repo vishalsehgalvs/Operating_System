@@ -321,6 +321,7 @@ Some file systems or services track file history automatically:
 > Working code that demonstrates backup strategies and snapshot versioning in practice.
 
 ### C++ — Simple Version
+
 Simulate full, incremental, and differential backup strategies on an in-memory file system.
 
 ```cpp
@@ -409,6 +410,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Snapshot-based versioning system — take, diff, and restore snapshots.
 
 ```cpp
@@ -496,6 +498,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Simulate full, incremental, and differential backup strategies on an in-memory file dictionary.
 
 ```python
@@ -561,6 +564,7 @@ print("  Restore from diff: full + diff2        (only 2 archives)")
 ```
 
 ### Python — Medium Level
+
 Snapshot versioning system — take/diff/restore snapshots with change tracking.
 
 ```python

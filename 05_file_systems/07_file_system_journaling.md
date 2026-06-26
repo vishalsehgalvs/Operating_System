@@ -305,6 +305,7 @@ After a system crash, on the next boot:
 > Working code that demonstrates write-ahead journaling and crash recovery in practice.
 
 ### C++ — Simple Version
+
 Simulate write-ahead journaling: write to journal first, then to disk. Crash during disk write, then recover by replaying the journal.
 
 ```cpp
@@ -397,6 +398,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Full journaling simulation with BEGIN/WRITE/COMMIT/CHECKPOINT/ABORT records, undo logging for aborted transactions, and redo-based crash recovery.
 
 ```cpp
@@ -524,6 +526,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Simulate write-ahead journaling: log, commit, apply, crash, and recover.
 
 ```python
@@ -595,6 +598,7 @@ print(f"Disk after recovery:  {disk}")    # data.json back
 ```
 
 ### Python — Medium Level
+
 Full WAL journal with BEGIN/WRITE/COMMIT/CHECKPOINT/ABORT records and redo-based crash recovery.
 
 ```python

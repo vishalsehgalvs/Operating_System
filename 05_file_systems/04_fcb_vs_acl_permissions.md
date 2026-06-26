@@ -270,6 +270,7 @@ Without ACL: bob and alice would get identical permissions since they're both in
 > Working code that demonstrates FCB metadata, Unix permission bits, and ACL-based access control in practice.
 
 ### C++ — Simple Version
+
 Simulate a File Control Block (FCB) and check Unix-style permission bits.
 
 ```cpp
@@ -332,6 +333,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Simulate an ACL system where per-user entries override Unix permission bits.
 
 ```cpp
@@ -409,6 +411,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 FCB dataclass with a Unix permission checker function.
 
 ```python
@@ -458,6 +461,7 @@ for user, grp, action in [
 ```
 
 ### Python — Medium Level
+
 ACL system where per-user entries override Unix permission bits, with a full access decision log.
 
 ```python

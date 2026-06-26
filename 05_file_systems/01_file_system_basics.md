@@ -236,6 +236,7 @@ flowchart TB
 > Working code that demonstrates file system basics in practice.
 
 ### C++ — Simple Version
+
 Simulate open/read/write/close file operations on an in-memory dictionary.
 
 ```cpp
@@ -301,6 +302,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Inode-based VFS simulation with inode table, directory entries, and a block bitmap.
 
 ```cpp
@@ -393,6 +395,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Basic open/read/write/close operations on an in-memory dictionary.
 
 ```python
@@ -447,6 +450,7 @@ close_file(fd)
 ```
 
 ### Python — Medium Level
+
 Inode-based VFS simulation with inode table, directory entries, and block allocation tracking.
 
 ```python

@@ -322,6 +322,7 @@ Audit logs record: timestamp, user, action type, file path, result (success/deni
 > Working code that demonstrates file system access control in practice.
 
 ### C++ — Simple Version
+
 Simulate Unix permission bits check — decode and enforce owner/group/other access.
 
 ```cpp
@@ -387,6 +388,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Multi-layer access control: Unix DAC + ACL + mandatory security label (Bell-LaPadula style).
 
 ```cpp
@@ -453,6 +455,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Decode and enforce Unix permission bits (owner/group/other rwx).
 
 ```python
@@ -511,6 +514,7 @@ for user, group, action in [
 ```
 
 ### Python — Medium Level
+
 Multi-layer access control: Unix bits + ACL + mandatory security clearance level.
 
 ```python

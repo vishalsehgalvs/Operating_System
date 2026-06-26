@@ -343,6 +343,7 @@ cryptsetup close my_volume                 # Re-encrypt / close when done
 > Working code that demonstrates file encryption concepts in practice.
 
 ### C++ — Simple Version
+
 XOR cipher on file data — same operation encrypts and decrypts (symmetric).
 
 ```cpp
@@ -391,6 +392,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Simplified block cipher: demonstrate key scheduling, SubBytes, and AddRoundKey concepts (AES-inspired, NOT real crypto).
 
 ```cpp
@@ -468,6 +470,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 XOR cipher encrypt/decrypt cycle — demonstrates that encryption and decryption are the same operation.
 
 ```python
@@ -505,6 +508,7 @@ for k in [b"A", b"Z", b"MULTIKEY"]:
 ```
 
 ### Python — Medium Level
+
 Block cipher simulation with PKCS#7 padding, toy key schedule, SubBytes, and AddRoundKey — AES concepts made visible.
 
 ```python

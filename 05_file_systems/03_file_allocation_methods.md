@@ -249,6 +249,7 @@ For large files, index blocks point to other index blocks:
 > Working code that demonstrates all three file allocation methods in practice.
 
 ### C++ — Simple Version
+
 Implement contiguous (array), linked (linked list of blocks), and indexed (index block) allocation side by side.
 
 ```cpp
@@ -343,6 +344,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 All three methods with access-time analysis and comparison printed at the end.
 
 ```cpp
@@ -440,6 +442,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 All three allocation methods in plain Python with demos.
 
 ```python
@@ -512,6 +515,7 @@ print(f"  Random access pos 2 -> '{read_indexed(idx, block_content, 2)}'")
 ```
 
 ### Python — Medium Level
+
 All three methods with access complexity comparison printed as a report.
 
 ```python

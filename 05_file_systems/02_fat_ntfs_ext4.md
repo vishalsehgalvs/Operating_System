@@ -244,6 +244,7 @@ graph LR
 > Working code that demonstrates FAT file system internals and fragmentation in practice.
 
 ### C++ — Simple Version
+
 Simulate a FAT table — allocate a file across clusters and read the FAT chain.
 
 ```cpp
@@ -306,6 +307,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Compare FAT (fragmented scatter) vs. ext4 extents (contiguous allocation).
 
 ```cpp
@@ -388,6 +390,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Simulate a FAT table as a list — allocate a file and follow the chain to read it back.
 
 ```python
@@ -437,6 +440,7 @@ print_fat()
 ```
 
 ### Python — Medium Level
+
 Compare FAT (non-contiguous scatter) with ext4-style extent allocation.
 
 ```python

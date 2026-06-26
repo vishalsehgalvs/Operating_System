@@ -295,6 +295,315 @@ Many real-world systems use BOTH. The pattern:
 
 ---
 
+## 7. Code Examples
+
+> Working code that demonstrates IPC message passing vs shared memory in practice.
+
+### C++ — Simple Version
+Simulate both IPC mechanisms with threads: message passing via a queue buffer, shared memory via a shared array.
+
+```cpp
+#include <iostream>
+#include <queue>
+#include <mutex>
+#include <thread>
+#include <string>
+#include <chrono>
+
+// ── Message Passing: data flows through a QUEUE buffer (like kernel copies) ───
+std::queue<std::string> message_box;   // simulates kernel-managed message buffer
+std::mutex mp_lock;
+
+void mp_producer() {
+    for (int i = 1; i <= 5; i++) {
+        std::string msg = "Message_" + std::to_string(i);
+        {
+            std::lock_guard<std::mutex> g(mp_lock);
+            message_box.push(msg);          // data is COPIED into the buffer
+        }
+        std::cout << "[MP Producer] sent: " << msg << "\n";
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+}
+
+void mp_consumer() {
+    int received = 0;
+    while (received < 5) {
+        std::lock_guard<std::mutex> g(mp_lock);
+        if (!message_box.empty()) {
+            std::string msg = message_box.front();
+            message_box.pop();              // data is COPIED out of the buffer
+            std::cout << "[MP Consumer] received: " << msg << "\n";
+            received++;
+        }
+    }
+}
+
+// ── Shared Memory: both sides access the SAME array directly (no copy) ────────
+int  shared_array[5];          // the shared region — both threads access this
+bool slot_ready[5] = {};       // flags: producer sets true when slot is filled
+std::mutex sm_lock;
+
+void sm_writer() {
+    for (int i = 0; i < 5; i++) {
+        {
+            std::lock_guard<std::mutex> g(sm_lock);
+            shared_array[i] = i * 10;      // DIRECT WRITE into shared region
+            slot_ready[i]   = true;
+        }
+        std::cout << "[SM Writer] wrote " << i * 10 << " at slot " << i << "\n";
+        std::this_thread::sleep_for(std::chrono::milliseconds(80));
+    }
+}
+
+void sm_reader() {
+    for (int i = 0; i < 5; i++) {
+        while (true) {
+            std::lock_guard<std::mutex> g(sm_lock);
+            if (slot_ready[i]) {
+                std::cout << "[SM Reader] read " << shared_array[i]
+                          << " from slot " << i << "\n";  // DIRECT READ — no copy
+                break;
+            }
+        }
+    }
+}
+
+int main() {
+    std::cout << "=== IPC: Message Passing (data copied through buffer) ===\n";
+    std::thread t1(mp_producer), t2(mp_consumer);
+    t1.join(); t2.join();
+
+    std::cout << "\n=== IPC: Shared Memory (direct access, no copy) ===\n";
+    std::thread t3(sm_writer), t4(sm_reader);
+    t3.join(); t4.join();
+
+    return 0;
+}
+```
+
+### C++ — Medium / LeetCode Style
+Benchmark throughput of message passing vs shared memory transferring N items — measure the copy overhead.
+
+```cpp
+#include <iostream>
+#include <queue>
+#include <vector>
+#include <mutex>
+#include <thread>
+#include <chrono>
+#include <atomic>
+
+constexpr int N = 100'000;   // number of items to transfer in each benchmark
+
+// ── Message Passing: mailbox with a kernel-like queue buffer ─────────────────
+struct Mailbox {
+    std::queue<int> buf;
+    std::mutex mtx;
+};
+
+void mp_sender(Mailbox& box) {
+    for (int i = 0; i < N; i++) {
+        std::lock_guard<std::mutex> g(box.mtx);
+        box.buf.push(i);                // COPY 1: sender → buffer
+    }
+}
+
+long long mp_receiver(Mailbox& box) {
+    long long sum = 0;
+    int count = 0;
+    while (count < N) {
+        std::lock_guard<std::mutex> g(box.mtx);
+        if (!box.buf.empty()) {
+            sum += box.buf.front();     // COPY 2: buffer → receiver
+            box.buf.pop();
+            count++;
+        }
+    }
+    return sum;
+}
+
+// ── Shared Memory: lock-free ring — both sides access the same vector ─────────
+struct SharedRegion {
+    std::vector<int> data = std::vector<int>(N);
+    std::atomic<int> produced{0};       // how many slots the writer has filled
+};
+
+void sm_writer(SharedRegion& r) {
+    for (int i = 0; i < N; i++) {
+        r.data[i] = i;                  // DIRECT WRITE — no copy at all
+        r.produced.fetch_add(1, std::memory_order_release);
+    }
+}
+
+long long sm_reader(SharedRegion& r) {
+    long long sum = 0;
+    for (int i = 0; i < N; i++) {
+        while (r.produced.load(std::memory_order_acquire) <= i) {}  // spin-wait
+        sum += r.data[i];               // DIRECT READ — no copy
+    }
+    return sum;
+}
+
+int main() {
+    // Benchmark message passing
+    Mailbox box;
+    auto mp_start = std::chrono::high_resolution_clock::now();
+    std::thread s(mp_sender, std::ref(box));
+    long long mp_sum = mp_receiver(box);
+    s.join();
+    auto mp_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::high_resolution_clock::now() - mp_start).count();
+
+    // Benchmark shared memory
+    SharedRegion region;
+    auto sm_start = std::chrono::high_resolution_clock::now();
+    std::thread w(sm_writer, std::ref(region));
+    long long sm_sum = sm_reader(region);
+    w.join();
+    auto sm_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::high_resolution_clock::now() - sm_start).count();
+
+    std::cout << "Items:           " << N << "\n";
+    std::cout << "Message Passing: sum=" << mp_sum << " | time=" << mp_ms << "ms\n";
+    std::cout << "Shared Memory  : sum=" << sm_sum << " | time=" << sm_ms << "ms\n";
+    std::cout << "Sums match: " << (mp_sum == sm_sum ? "YES" : "NO") << "\n";
+    if (sm_ms > 0)
+        std::cout << "Shared memory ~" << mp_ms / sm_ms << "x faster\n";
+
+    return 0;
+}
+```
+
+### Python — Simple Version
+Demonstrate both IPC mechanisms side by side: queue for message passing, shared list for shared memory.
+
+```python
+import threading
+import queue
+import time
+
+# ── Message Passing: producer and consumer share a QUEUE BUFFER ───────────────
+# Two copies: sender→buffer, buffer→receiver (like kernel copies in real IPC)
+
+message_box = queue.Queue()   # simulates kernel-managed message buffer
+
+def mp_producer():
+    for i in range(1, 6):
+        msg = f"Message_{i}"
+        message_box.put(msg)              # COPY: data goes into the buffer
+        print(f"[MP Producer] sent: {msg}")
+        time.sleep(0.1)
+
+def mp_consumer():
+    for _ in range(5):
+        msg = message_box.get()           # COPY: data comes out of the buffer
+        print(f"[MP Consumer] received: {msg}")
+
+# ── Shared Memory: producer and consumer access the SAME LIST directly ─────────
+# No copy — but requires explicit synchronization (mutex) to avoid races
+
+shared_list = [None] * 5
+slot_ready  = [False] * 5
+sm_lock     = threading.Lock()
+
+def sm_writer():
+    for i in range(5):
+        with sm_lock:
+            shared_list[i] = i * 10       # DIRECT WRITE — no copy
+            slot_ready[i]  = True
+        print(f"[SM Writer] wrote {i * 10} at slot {i}")
+        time.sleep(0.08)
+
+def sm_reader():
+    for i in range(5):
+        while True:
+            with sm_lock:
+                if slot_ready[i]:
+                    print(f"[SM Reader] read {shared_list[i]} from slot {i}")
+                    break                 # DIRECT READ — no copy
+
+print("=== Message Passing (data copied through queue buffer) ===")
+t1 = threading.Thread(target=mp_producer)
+t2 = threading.Thread(target=mp_consumer)
+t1.start(); t2.start(); t1.join(); t2.join()
+
+print("\n=== Shared Memory (direct access, no copy) ===")
+t3 = threading.Thread(target=sm_writer)
+t4 = threading.Thread(target=sm_reader)
+t3.start(); t4.start(); t3.join(); t4.join()
+```
+
+### Python — Medium Level
+Compare throughput of both mechanisms with timing — shows why shared memory wins for bulk data.
+
+```python
+import threading
+import queue
+import time
+
+N = 50_000   # items to transfer in each benchmark
+
+# ── Message Passing: mailbox with buffered queue ──────────────────────────────
+def run_message_passing():
+    mailbox = queue.Queue()
+    results = {}
+
+    def sender():
+        for i in range(N):
+            mailbox.put(i)                # COPY: item goes into queue buffer
+
+    def receiver():
+        total = 0
+        for _ in range(N):
+            total += mailbox.get()        # COPY: item comes out of buffer
+        results["sum"] = total
+
+    t1, t2 = threading.Thread(target=sender), threading.Thread(target=receiver)
+    start = time.perf_counter()
+    t1.start(); t2.start(); t1.join(); t2.join()
+    return results["sum"], time.perf_counter() - start
+
+# ── Shared Memory: both threads access the same list directly ─────────────────
+def run_shared_memory():
+    shared   = [0] * N         # both threads access the SAME list — no copy
+    produced = [0]             # tracks how many slots writer has filled
+    lock     = threading.Lock()
+    results  = {}
+
+    def writer():
+        for i in range(N):
+            with lock:
+                shared[i]   = i       # DIRECT WRITE — no copy
+                produced[0] = i + 1   # signal that slot i is ready
+
+    def reader():
+        total = 0
+        for i in range(N):
+            while True:               # spin-wait until writer fills slot i
+                with lock:
+                    if produced[0] > i:
+                        total += shared[i]   # DIRECT READ — no copy
+                        break
+        results["sum"] = total
+
+    t1, t2 = threading.Thread(target=writer), threading.Thread(target=reader)
+    start = time.perf_counter()
+    t1.start(); t2.start(); t1.join(); t2.join()
+    return results["sum"], time.perf_counter() - start
+
+mp_sum, mp_time = run_message_passing()
+sm_sum, sm_time = run_shared_memory()
+
+print(f"Items:           {N:,}")
+print(f"Message Passing: sum={mp_sum:,} | time={mp_time:.3f}s")
+print(f"Shared Memory  : sum={sm_sum:,} | time={sm_time:.3f}s")
+print(f"Sums match: {mp_sum == sm_sum}")
+print(f"Faster by:  {mp_time / sm_time:.1f}x  (shared memory wins for bulk data)")
+```
+
+---
+
 ## 8. Key Takeaways
 
 - **IPC** is needed because processes run in isolated memory spaces — they cannot read each other's RAM without OS-mediated mechanisms

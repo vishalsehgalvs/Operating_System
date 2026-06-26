@@ -300,6 +300,405 @@ with open("/tmp/data_pipe", 'r') as pipe:
 
 ---
 
+## 7. Code Examples
+
+> Working code that demonstrates pipes and named pipes in practice.
+
+### C++ — Simple Version
+Simulate an anonymous pipe: one thread writes into a FIFO buffer, another reads — includes EOF handling.
+
+```cpp
+#include <iostream>
+#include <queue>
+#include <string>
+#include <mutex>
+#include <condition_variable>
+#include <thread>
+
+// ── Anonymous Pipe simulation ─────────────────────────────────────────────────
+// Real pipe: pipe() returns two FDs — write_fd and read_fd.
+// Unidirectional FIFO. When all write ends close, reader gets EOF.
+// Simulation: a shared queue protected by mutex + condvar (identical semantics).
+
+class AnonymousPipe {
+    std::queue<std::string> buffer;
+    std::mutex mtx;
+    std::condition_variable cv;
+    bool write_end_closed = false;   // simulates: all write FDs closed → EOF
+
+public:
+    // write() — puts data into the pipe (like write(write_fd, ...))
+    void write(const std::string& data) {
+        {
+            std::lock_guard<std::mutex> lock(mtx);
+            buffer.push(data);
+        }
+        cv.notify_one();
+    }
+
+    // close_write() — closing write end signals EOF to reader
+    void close_write() {
+        {
+            std::lock_guard<std::mutex> lock(mtx);
+            write_end_closed = true;
+        }
+        cv.notify_all();
+    }
+
+    // read() — blocks until data arrives; returns "" on EOF
+    std::string read() {
+        std::unique_lock<std::mutex> lock(mtx);
+        cv.wait(lock, [&] { return !buffer.empty() || write_end_closed; });
+        if (!buffer.empty()) {
+            std::string data = buffer.front();
+            buffer.pop();
+            return data;
+        }
+        return "";   // empty string = EOF
+    }
+};
+
+AnonymousPipe pipe_channel;
+
+// Parent "process" — holds the write end of the pipe
+void parent_process() {
+    std::string lines[] = { "Hello from parent", "Line 2", "Line 3", "Last line" };
+    for (const auto& line : lines) {
+        pipe_channel.write(line);
+        std::cout << "[Parent → Pipe] wrote: \"" << line << "\"\n";
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    pipe_channel.close_write();    // close write end → child sees EOF
+    std::cout << "[Parent] Closed write end\n";
+}
+
+// Child "process" — holds the read end of the pipe
+void child_process() {
+    std::cout << "[Child] Waiting to read from pipe...\n";
+    while (true) {
+        std::string data = pipe_channel.read();
+        if (data.empty()) {
+            std::cout << "[Child] Got EOF — write end closed\n";
+            break;
+        }
+        std::cout << "[Child ← Pipe] read: \"" << data << "\"\n";
+    }
+}
+
+int main() {
+    std::cout << "=== Anonymous Pipe Simulation ===\n";
+    std::cout << "Data: Parent ──[pipe]──► Child  (unidirectional FIFO)\n\n";
+
+    std::thread writer(parent_process);
+    std::thread reader(child_process);
+    writer.join();
+    reader.join();
+
+    return 0;
+}
+```
+
+### C++ — Medium / LeetCode Style
+Simulate a named pipe with a registry: two unrelated writers connect by name (no fork required), one reader drains until EOF.
+
+```cpp
+#include <iostream>
+#include <queue>
+#include <string>
+#include <mutex>
+#include <condition_variable>
+#include <thread>
+#include <map>
+
+// ── Named Pipe: identified by a filesystem path, not by inherited FD ──────────
+// Any process can open it by name — no parent-child relationship needed.
+// Created with mkfifo(); persists on disk until unlink() removes it.
+
+class NamedPipe {
+    std::string path;
+    std::queue<std::string> buffer;
+    std::mutex mtx;
+    std::condition_variable cv;
+    int active_writers = 0;
+
+public:
+    explicit NamedPipe(const std::string& p) : path(p) {}
+
+    void open_write() {
+        std::lock_guard<std::mutex> lock(mtx);
+        active_writers++;
+    }
+
+    void close_write() {
+        {
+            std::lock_guard<std::mutex> lock(mtx);
+            active_writers--;
+        }
+        cv.notify_all();   // may unblock reader waiting for EOF
+    }
+
+    void write(const std::string& data) {
+        {
+            std::lock_guard<std::mutex> lock(mtx);
+            buffer.push(data);
+        }
+        cv.notify_one();
+    }
+
+    // Returns false when all writers closed and buffer is drained (EOF)
+    bool read(std::string& out) {
+        std::unique_lock<std::mutex> lock(mtx);
+        cv.wait(lock, [&] { return !buffer.empty() || active_writers == 0; });
+        if (!buffer.empty()) { out = buffer.front(); buffer.pop(); return true; }
+        return false;   // EOF
+    }
+
+    const std::string& name() const { return path; }
+};
+
+// ── Global registry — simulates the filesystem (mkfifo creates the entry) ─────
+std::map<std::string, NamedPipe*> pipe_registry;
+std::mutex registry_mtx;
+
+NamedPipe* mkfifo(const std::string& path) {
+    std::lock_guard<std::mutex> lock(registry_mtx);
+    if (!pipe_registry.count(path))
+        pipe_registry[path] = new NamedPipe(path);
+    return pipe_registry[path];
+}
+
+NamedPipe* open_pipe(const std::string& path) {
+    std::lock_guard<std::mutex> lock(registry_mtx);
+    return pipe_registry.at(path);   // throws if not found (like ENOENT)
+}
+
+// ── Two UNRELATED writers: they find the pipe by name, not via fork() ─────────
+void writer_A() {
+    NamedPipe* p = open_pipe("/tmp/data_pipe");
+    p->open_write();
+    for (int i = 1; i <= 3; i++) {
+        std::string msg = "WriterA_item" + std::to_string(i);
+        p->write(msg);
+        std::cout << "[Writer A] wrote: " << msg << "\n";
+        std::this_thread::sleep_for(std::chrono::milliseconds(120));
+    }
+    p->close_write();
+    std::cout << "[Writer A] closed\n";
+}
+
+void writer_B() {
+    NamedPipe* p = open_pipe("/tmp/data_pipe");
+    p->open_write();
+    std::this_thread::sleep_for(std::chrono::milliseconds(60));   // stagger
+    for (int i = 1; i <= 3; i++) {
+        std::string msg = "WriterB_item" + std::to_string(i);
+        p->write(msg);
+        std::cout << "[Writer B] wrote: " << msg << "\n";
+        std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    }
+    p->close_write();
+    std::cout << "[Writer B] closed\n";
+}
+
+void reader_process() {
+    NamedPipe* p = open_pipe("/tmp/data_pipe");
+    std::cout << "[Reader] Opened '" << p->name() << "' — waiting...\n";
+    std::string line;
+    while (p->read(line))
+        std::cout << "[Reader] received: " << line << "\n";
+    std::cout << "[Reader] EOF — all writers closed\n";
+}
+
+int main() {
+    std::cout << "=== Named Pipe Simulation ===\n";
+    std::cout << "Two UNRELATED writers + one reader — connected only by pipe name\n\n";
+
+    mkfifo("/tmp/data_pipe");   // create the named pipe (like mkfifo in shell)
+
+    std::thread r(reader_process);
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    std::thread wa(writer_A);
+    std::thread wb(writer_B);
+
+    wa.join(); wb.join(); r.join();
+
+    std::cout << "\nKey: Writers A and B have no parent-child relationship.\n";
+    std::cout << "They connected to the same pipe purely by its filesystem name.\n";
+
+    return 0;
+}
+```
+
+### Python — Simple Version
+Simulate an anonymous pipe: producer writes, consumer reads with FIFO order and EOF signalling.
+
+```python
+import threading
+import queue
+import time
+
+# ── Anonymous Pipe simulation ─────────────────────────────────────────────────
+# Real POSIX pipe: pipe() returns (read_fd, write_fd) — unidirectional FIFO.
+# Closing all write ends → reader gets EOF after draining remaining data.
+# Python's queue.Queue behaves identically: FIFO, blocking reads, sentinel EOF.
+
+class AnonymousPipe:
+    def __init__(self):
+        self._buf    = queue.Queue()        # FIFO buffer (kernel pipe buffer)
+        self._closed = False
+
+    def write(self, data: str):
+        """Write end: put data into pipe (like write(write_fd, data))."""
+        self._buf.put(data)
+        print(f"[Write End] wrote: '{data}'")
+
+    def close(self):
+        """Close write end: send EOF sentinel so reader unblocks."""
+        self._closed = True
+        self._buf.put(None)               # None = EOF sentinel
+
+    def read(self) -> str | None:
+        """Read end: blocks until data available. Returns None on EOF."""
+        return self._buf.get()            # None = EOF
+
+pipe = AnonymousPipe()
+
+def parent_writes():
+    """Parent process — holds write end."""
+    for line in ["Hello from parent", "Line 2", "Final line"]:
+        pipe.write(line)
+        time.sleep(0.1)
+    pipe.close()
+    print("[Parent] Closed write end")
+
+def child_reads():
+    """Child process — holds read end."""
+    print("[Child] Waiting to read from pipe...")
+    while True:
+        data = pipe.read()
+        if data is None:
+            print("[Child] Got EOF — write end closed")
+            break
+        print(f"[Child] read: '{data}'")
+
+print("=== Anonymous Pipe Simulation ===")
+print("Data: Parent ──[pipe]──► Child  (unidirectional FIFO)\n")
+t1 = threading.Thread(target=parent_writes)
+t2 = threading.Thread(target=child_reads)
+t1.start(); t2.start()
+t1.join();  t2.join()
+```
+
+### Python — Medium Level
+Simulate a named pipe with a registry: multiple unrelated processes connect by path, reader gets EOF when all writers close.
+
+```python
+import threading
+import queue
+import time
+
+# ── Named pipe registry — simulates filesystem entries created by mkfifo() ────
+_registry: dict[str, "NamedPipe"] = {}
+_registry_lock = threading.Lock()
+
+class NamedPipe:
+    """Named pipe: any code opens it by path — no fork/parent relationship."""
+
+    def __init__(self, path: str):
+        self.path    = path
+        self._buf    = queue.Queue()
+        self._writers = 0
+        self._lock   = threading.Lock()
+
+    def open_write(self):
+        with self._lock:
+            self._writers += 1
+
+    def close_write(self):
+        with self._lock:
+            self._writers -= 1
+            if self._writers == 0:
+                self._buf.put(None)       # EOF sentinel for reader
+
+    def write(self, data: str):
+        self._buf.put(data)
+
+    def read(self) -> str | None:
+        """Blocks until data available. Returns None on EOF."""
+        return self._buf.get()
+
+def mkfifo(path: str) -> NamedPipe:
+    """Create named pipe (like mkfifo /tmp/path in shell)."""
+    with _registry_lock:
+        if path not in _registry:
+            _registry[path] = NamedPipe(path)
+        return _registry[path]
+
+def open_fifo(path: str) -> NamedPipe:
+    """Open existing named pipe by path — any process can call this."""
+    with _registry_lock:
+        if path not in _registry:
+            raise FileNotFoundError(f"Named pipe '{path}' not found")
+        return _registry[path]
+
+# ── Demo: two completely unrelated "processes" write, one reads ───────────────
+PIPE = "/tmp/log_pipe"
+
+def daemon_logger():
+    """Unrelated daemon — no fork(), just opens the pipe by name."""
+    p = open_fifo(PIPE)
+    p.open_write()
+    for i in range(1, 4):
+        msg = f"[Logger] event_{i}"
+        p.write(msg)
+        print(f"[Logger daemon] wrote: {msg}")
+        time.sleep(0.15)
+    p.close_write()
+    print("[Logger daemon] closed")
+
+def app_process():
+    """Unrelated app — also opens the same pipe by name independently."""
+    p = open_fifo(PIPE)
+    p.open_write()
+    time.sleep(0.08)                      # stagger so messages interleave
+    for i in range(1, 4):
+        msg = f"[App] request_{i}"
+        p.write(msg)
+        print(f"[App process]    wrote: {msg}")
+        time.sleep(0.2)
+    p.close_write()
+    print("[App process] closed")
+
+def log_monitor():
+    """Monitor — reads everything until both writers have closed."""
+    p = open_fifo(PIPE)
+    print(f"[Monitor] Opened '{PIPE}' — reading...\n")
+    while True:
+        data = p.read()
+        if data is None:
+            print("[Monitor] EOF — all writers closed")
+            break
+        print(f"[Monitor] received: {data}")
+
+mkfifo(PIPE)   # create the named pipe first (like: mkfifo /tmp/log_pipe)
+
+print("=== Named Pipe Simulation ===")
+print("Logger + App (UNRELATED) both write; Monitor reads until EOF\n")
+
+monitor = threading.Thread(target=log_monitor)
+logger  = threading.Thread(target=daemon_logger)
+app     = threading.Thread(target=app_process)
+
+monitor.start()
+time.sleep(0.02)
+logger.start(); app.start()
+logger.join(); app.join(); monitor.join()
+
+print("\nKey: Logger and App are unrelated — connected only by pipe path.")
+```
+
+---
+
 ## 8. Key Takeaways
 
 - **Pipe** = unidirectional, in-memory FIFO channel between two processes — data flows one way only

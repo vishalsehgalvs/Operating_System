@@ -382,6 +382,387 @@ int parse_expr(const char** pos) {
 
 ---
 
+## 7. Code Examples
+
+> Working code that demonstrates thread safety and reentrancy in practice.
+
+### C++ — Simple Version
+Non-thread-safe function uses a shared global buffer; thread-safe version uses local variables — run both with multiple threads and observe the difference.
+
+```cpp
+#include <iostream>
+#include <thread>
+#include <mutex>
+#include <vector>
+#include <string>
+#include <cstdio>
+#include <chrono>
+
+// ── NON-THREAD-SAFE: uses a GLOBAL static buffer ─────────────────────────────
+// All threads share the same buffer → one thread overwrites while another reads
+char global_buf[64];   // shared by ALL threads — danger zone!
+
+std::string format_unsafe(int value) {
+    snprintf(global_buf, sizeof(global_buf), "value=%d", value);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));  // simulate work
+    return std::string(global_buf);   // another thread may have clobbered this!
+}
+
+// ── THREAD-SAFE: uses LOCAL variables only ────────────────────────────────────
+// Each thread call gets its own stack frame → no sharing → no race condition
+
+std::string format_safe(int value) {
+    char local_buf[64];   // lives on THIS thread's stack — not shared
+    snprintf(local_buf, sizeof(local_buf), "value=%d", value);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    return std::string(local_buf);   // always correct — it's ours alone
+}
+
+std::mutex print_lock;   // only for clean console output
+
+void run_unsafe(int id) {
+    std::string result = format_unsafe(id);
+    std::lock_guard<std::mutex> g(print_lock);
+    std::string expected = "value=" + std::to_string(id);
+    std::cout << "  Thread " << id << " unsafe: " << result
+              << (result != expected ? "  ← CORRUPTED!" : "  ✓") << "\n";
+}
+
+void run_safe(int id) {
+    std::string result = format_safe(id);
+    std::lock_guard<std::mutex> g(print_lock);
+    std::cout << "  Thread " << id << " safe:   " << result << "  ✓\n";
+}
+
+int main() {
+    constexpr int N = 6;
+
+    std::cout << "=== Non-thread-safe (global buffer) ===\n";
+    std::cout << "Expected: each thread sees its own value. Actual:\n";
+    std::vector<std::thread> unsafe_threads;
+    for (int i = 1; i <= N; i++) unsafe_threads.emplace_back(run_unsafe, i);
+    for (auto& t : unsafe_threads) t.join();
+
+    std::cout << "\n=== Thread-safe (local buffer) ===\n";
+    std::cout << "Each thread uses its own stack — always correct:\n";
+    std::vector<std::thread> safe_threads;
+    for (int i = 1; i <= N; i++) safe_threads.emplace_back(run_safe, i);
+    for (auto& t : safe_threads) t.join();
+
+    std::cout << "\nConclusion: same logic, different storage → completely different behavior.\n";
+    return 0;
+}
+```
+
+### C++ — Medium / LeetCode Style
+Thread-safe singleton, thread-safe stack, and reentrant vs non-reentrant tokenizer with nested-call demonstration.
+
+```cpp
+#include <iostream>
+#include <mutex>
+#include <stack>
+#include <thread>
+#include <vector>
+#include <string>
+
+// ── 1. Thread-safe Singleton (Meyer's Singleton — C++11 guaranteed) ───────────
+class Config {
+    Config() { std::cout << "  [Config] instance created exactly once\n"; }
+public:
+    static Config& instance() {
+        static Config inst;   // C++11: initialized exactly once even with races
+        return inst;
+    }
+    std::string get(const std::string& key) const { return "val_" + key; }
+    Config(const Config&) = delete;
+    Config& operator=(const Config&) = delete;
+};
+
+void use_config(int tid) {
+    Config& cfg = Config::instance();   // all threads get the SAME object
+    std::cout << "  Thread " << tid << ": " << cfg.get("timeout") << "\n";
+}
+
+// ── 2. Thread-safe Stack ──────────────────────────────────────────────────────
+template<typename T>
+class ThreadSafeStack {
+    std::stack<T> data;
+    mutable std::mutex mtx;
+public:
+    void push(T val) {
+        std::lock_guard<std::mutex> lock(mtx);
+        data.push(std::move(val));
+    }
+    bool pop(T& out) {
+        std::lock_guard<std::mutex> lock(mtx);
+        if (data.empty()) return false;
+        out = std::move(data.top());
+        data.pop();
+        return true;
+    }
+    bool empty() const {
+        std::lock_guard<std::mutex> lock(mtx);
+        return data.empty();
+    }
+};
+
+// ── 3a. NON-REENTRANT tokenizer (like C's strtok) ─────────────────────────────
+// Uses a static variable → a nested call OVERWRITES the saved state
+
+char* strtok_nonreentrant(char* str, char delim) {
+    static char* saved = nullptr;   // STATIC: shared by all callers — danger!
+    if (str) saved = str;
+    if (!saved || *saved == '\0') return nullptr;
+    char* start = saved;
+    while (*saved && *saved != delim) saved++;
+    if (*saved) { *saved = '\0'; saved++; } else { saved = nullptr; }
+    return start;
+}
+
+// ── 3b. REENTRANT tokenizer (like POSIX strtok_r) ─────────────────────────────
+// Caller provides saveptr → each call site has its OWN state → safe to nest
+
+char* strtok_reentrant(char* str, char delim, char** saveptr) {
+    if (str) *saveptr = str;        // caller-owned state — no hidden globals
+    if (!*saveptr || **saveptr == '\0') return nullptr;
+    char* start = *saveptr;
+    while (**saveptr && **saveptr != delim) (*saveptr)++;
+    if (**saveptr) { **saveptr = '\0'; (*saveptr)++; } else { *saveptr = nullptr; }
+    return start;
+}
+
+int main() {
+    // 1. Singleton
+    std::cout << "=== 1. Thread-safe Singleton ===\n";
+    std::vector<std::thread> cfg_threads;
+    for (int i = 1; i <= 4; i++) cfg_threads.emplace_back(use_config, i);
+    for (auto& t : cfg_threads) t.join();
+    std::cout << "  (Created only once no matter how many threads raced)\n";
+
+    // 2. Thread-safe stack
+    std::cout << "\n=== 2. Thread-safe Stack ===\n";
+    ThreadSafeStack<int> ts;
+    auto pusher = [&](int base) { for (int i = base; i < base + 3; i++) ts.push(i); };
+    std::thread p1(pusher, 10), p2(pusher, 20);
+    p1.join(); p2.join();
+    int val;
+    std::cout << "  Popped:";
+    while (ts.pop(val)) std::cout << " " << val;
+    std::cout << "\n";
+
+    // 3. Tokenizer reentrancy
+    std::cout << "\n=== 3a. Non-reentrant tokenizer (nested call corrupts outer) ===\n";
+    char s1[] = "a,b,c";
+    char* tok = strtok_nonreentrant(s1, ',');
+    while (tok) {
+        std::cout << "  outer: " << tok << "\n";
+        char tmp[] = "x,y";
+        strtok_nonreentrant(tmp, ',');  // nested call OVERWRITES static saveptr
+        tok = strtok_nonreentrant(nullptr, ',');  // outer iteration now broken
+    }
+
+    std::cout << "\n=== 3b. Reentrant tokenizer (nested call is safe) ===\n";
+    char s2[] = "a,b,c";
+    char *outer_save = nullptr, *inner_save = nullptr;
+    tok = strtok_reentrant(s2, ',', &outer_save);
+    while (tok) {
+        std::cout << "  outer: " << tok << "\n";
+        char tmp[] = "x,y";
+        char* inner = strtok_reentrant(tmp, ',', &inner_save);
+        while (inner) inner = strtok_reentrant(nullptr, ',', &inner_save);
+        tok = strtok_reentrant(nullptr, ',', &outer_save);  // outer continues correctly
+    }
+
+    return 0;
+}
+```
+
+### Python — Simple Version
+Non-thread-safe function uses a module-level global; thread-safe version uses only local variables — corruption is visible with enough threads.
+
+```python
+import threading
+import time
+
+# ── NON-THREAD-SAFE: function uses a MODULE-LEVEL (shared) variable ───────────
+# All threads read/modify the same global → race conditions guaranteed
+
+_global_result = ""   # shared by ALL threads — danger!
+
+def format_unsafe(value: int) -> str:
+    global _global_result
+    _global_result = f"value={value}"   # WRITE to shared global
+    time.sleep(0.001)                   # another thread can overwrite here
+    return _global_result               # may see another thread's value!
+
+# ── THREAD-SAFE: function uses ONLY local variables ───────────────────────────
+# Each call gets its own stack frame — nothing is shared between threads
+
+def format_safe(value: int) -> str:
+    local_result = f"value={value}"     # lives only in this call's scope
+    time.sleep(0.001)
+    return local_result                 # always correct — nothing else touches it
+
+print_lock = threading.Lock()
+
+def run_unsafe(thread_id: int, results: list):
+    result   = format_unsafe(thread_id)
+    expected = f"value={thread_id}"
+    with print_lock:
+        status = "✓" if result == expected else f"← CORRUPTED! (got '{result}')"
+        print(f"  Thread {thread_id} unsafe: {result}  {status}")
+        results.append(result == expected)
+
+def run_safe(thread_id: int):
+    result = format_safe(thread_id)
+    with print_lock:
+        print(f"  Thread {thread_id} safe:   {result}  ✓")
+
+print("=== Non-thread-safe (global variable) ===")
+print("Expected: each thread sees its own value. Actual:")
+results = []
+unsafe = [threading.Thread(target=run_unsafe, args=(i, results)) for i in range(1, 7)]
+for t in unsafe: t.start()
+for t in unsafe: t.join()
+print(f"  Corruptions: {results.count(False)}/6\n")
+
+print("=== Thread-safe (local variables only) ===")
+safe = [threading.Thread(target=run_safe, args=(i,)) for i in range(1, 7)]
+for t in safe: t.start()
+for t in safe: t.join()
+
+print("\nConclusion: global state → races; local state → thread-safe.")
+```
+
+### Python — Medium Level
+Thread-safe stack with a mutex, reentrant vs non-reentrant tokenizer with nested-call demonstration, and a reentrant recursive expression evaluator.
+
+```python
+import threading
+from typing import TypeVar, Generic
+
+T = TypeVar("T")
+
+# ── 1. Thread-safe Stack ──────────────────────────────────────────────────────
+class ThreadSafeStack(Generic[T]):
+    """Stack protected by a mutex — safe to push/pop from multiple threads."""
+
+    def __init__(self):
+        self._data: list[T] = []
+        self._lock = threading.Lock()
+
+    def push(self, item: T) -> None:
+        with self._lock:        # acquire lock before touching shared data
+            self._data.append(item)
+
+    def pop(self) -> T | None:
+        with self._lock:
+            return self._data.pop() if self._data else None
+
+    def size(self) -> int:
+        with self._lock:
+            return len(self._data)
+
+# ── 2a. NON-REENTRANT tokenizer: uses module-level shared state ───────────────
+_saved_str = ""
+_saved_pos = 0
+
+def strtok_nr(s: str | None, sep: str) -> str | None:
+    """Like C's strtok — not reentrant because state is hidden in globals."""
+    global _saved_str, _saved_pos
+    if s is not None:
+        _saved_str = s    # nested call will OVERWRITE this!
+        _saved_pos = 0
+    while _saved_pos < len(_saved_str) and _saved_str[_saved_pos] == sep:
+        _saved_pos += 1
+    if _saved_pos >= len(_saved_str):
+        return None
+    start = _saved_pos
+    while _saved_pos < len(_saved_str) and _saved_str[_saved_pos] != sep:
+        _saved_pos += 1
+    return _saved_str[start:_saved_pos]
+
+# ── 2b. REENTRANT tokenizer: all state provided by caller ────────────────────
+def strtok_r(s: str | None, sep: str, state: list) -> str | None:
+    """Reentrant: caller owns the state list [string, pos] — no hidden globals."""
+    if s is not None:
+        state[0], state[1] = s, 0    # caller stores their own state
+    src, pos = state[0], state[1]
+    while pos < len(src) and src[pos] == sep:
+        pos += 1
+    if pos >= len(src):
+        return None
+    start = pos
+    while pos < len(src) and src[pos] != sep:
+        pos += 1
+    state[1] = pos
+    return src[start:pos]
+
+# ── 3. Reentrant recursive expression evaluator ───────────────────────────────
+def eval_expr(expr: str) -> int:
+    """
+    Reentrant: uses ONLY local variables — safe for recursion and concurrent calls.
+    Handles simple expressions like "3+5-2", "10+3-1+2".
+    """
+    tokens: list[int | str] = []    # LOCAL — not shared with any other call
+    i = 0
+    while i < len(expr):
+        if expr[i].isdigit():
+            j = i
+            while j < len(expr) and expr[j].isdigit():
+                j += 1
+            tokens.append(int(expr[i:j]))
+            i = j
+        else:
+            tokens.append(expr[i])
+            i += 1
+    result = tokens[0]              # LOCAL result — each call has its own
+    idx = 1
+    while idx < len(tokens):
+        op  = tokens[idx]
+        num = tokens[idx + 1]
+        result = result + num if op == '+' else result - num
+        idx += 2
+    return result
+
+# ── Demo ───────────────────────────────────────────────────────────────────────
+print("=== 1. Thread-safe Stack ===")
+stack: ThreadSafeStack[int] = ThreadSafeStack()
+def pusher(base: int):
+    for i in range(base, base + 3):
+        stack.push(i)
+threads = [threading.Thread(target=pusher, args=(b,)) for b in [10, 20, 30]]
+for t in threads: t.start()
+for t in threads: t.join()
+print(f"  Stack size after 9 pushes from 3 threads: {stack.size()} (expected 9)")
+
+print("\n=== 2a. Non-reentrant tokenizer ===")
+tok = strtok_nr("a,b,c", ",")
+while tok:
+    print(f"  outer: {tok}")
+    strtok_nr("x,y,z", ",")    # nested call OVERWRITES global state
+    tok = strtok_nr(None, ",") # outer iteration is now hijacked
+print("  (outer was corrupted by nested call)")
+
+print("\n=== 2b. Reentrant tokenizer ===")
+outer_state, inner_state = [None, 0], [None, 0]
+tok = strtok_r("a,b,c", ",", outer_state)
+while tok:
+    print(f"  outer: {tok}")
+    inner = strtok_r("x,y,z", ",", inner_state)
+    while inner:
+        inner = strtok_r(None, ",", inner_state)   # uses its OWN state
+    tok = strtok_r(None, ",", outer_state)         # outer unaffected
+print("  (outer continued correctly — nested call used its own state)")
+
+print("\n=== 3. Reentrant expression evaluator ===")
+for e in ["3+5", "10+3-1", "100-50+25-10"]:
+    print(f"  eval('{e}') = {eval_expr(e)}")
+print("  (all local variables → safe for recursion and concurrent calls)")
+```
+
+---
+
 ## 8. Key Takeaways
 
 - **Thread safety:** function works correctly when called by multiple threads simultaneously — typically achieved with mutexes protecting shared data

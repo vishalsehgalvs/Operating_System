@@ -266,6 +266,7 @@ User programs **cannot** read or write PCBs directly — this is a core security
 > Working code that demonstrates PCB structure, creation, and context save/restore in practice.
 
 ### C++ — Simple Version
+
 Define a PCB struct with all OS fields — create, display, and compare two PCBs.
 
 ```cpp
@@ -351,6 +352,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 PCB manager with save and restore to simulate context switching between processes.
 
 ```cpp
@@ -439,6 +441,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 PCB as a dataclass — create two processes, simulate saving/restoring CPU state.
 
 ```python
@@ -498,6 +501,7 @@ p2.display()
 ```
 
 ### Python — Medium Level
+
 ProcessTable class with save/restore context — simulates what the OS does on every context switch.
 
 ```python

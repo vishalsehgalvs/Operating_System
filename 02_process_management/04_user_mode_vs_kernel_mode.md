@@ -315,6 +315,7 @@ When a user program makes a system call, **the kernel runs code on behalf of tha
 > Working code that demonstrates user mode vs kernel mode switching in practice.
 
 ### C++ — Simple Version
+
 Simulate a privilege flag, a user-mode app making a syscall, and the kernel handler taking over.
 
 ```cpp
@@ -376,6 +377,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Syscall dispatcher with multiple syscall types, privilege validation, and mode-switch logging.
 
 ```cpp
@@ -452,6 +454,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Mode flag simulation — user code requests a syscall, kernel handler runs with elevated privileges.
 
 ```python
@@ -498,6 +501,7 @@ user_app()
 ```
 
 ### Python — Medium Level
+
 Decorator-based syscall table — any function marked `@kernel_only` runs in kernel mode automatically.
 
 ```python

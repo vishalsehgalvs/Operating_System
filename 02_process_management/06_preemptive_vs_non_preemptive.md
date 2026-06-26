@@ -270,6 +270,7 @@ Modern OS designers accept this overhead because user experience requires it.
 > Working code that demonstrates preemptive vs non-preemptive scheduling side by side in practice.
 
 ### C++ — Simple Version
+
 Non-preemptive FCFS — each process runs to completion before the next one starts.
 
 ```cpp
@@ -328,6 +329,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Both schedulers on the same job set — compare average waiting time to see why preemption matters.
 
 ```cpp
@@ -421,6 +423,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Non-preemptive FCFS — run each process to completion, calculate waiting and turnaround times.
 
 ```python
@@ -470,6 +473,7 @@ fcfs_non_preemptive(procs)
 ```
 
 ### Python — Medium Level
+
 Both schedulers on the same job set — compare results to quantify the benefit of preemption.
 
 ```python

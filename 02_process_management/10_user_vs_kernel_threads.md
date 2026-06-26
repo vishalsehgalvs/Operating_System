@@ -281,6 +281,7 @@ A web server handles many client connections, each in a separate thread:
 > Working code that demonstrates Many-to-One, One-to-One, and Many-to-Many threading models in practice.
 
 ### C++ — Simple Version
+
 Simulate Many-to-One (N user threads share 1 kernel thread) and One-to-One (each user thread has its own kernel thread).
 
 ```cpp
@@ -361,6 +362,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Simulate all three models (Many-to-One, One-to-One, Many-to-Many) with a scheduler showing how user threads map to kernel threads.
 
 ```cpp
@@ -464,6 +466,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Mock UserThread and KernelThread classes — show how Many-to-One vs One-to-One behave when one thread blocks.
 
 ```python
@@ -519,6 +522,7 @@ one_to_one(threads)
 ```
 
 ### Python — Medium Level
+
 Simulate all three models with a Many-to-Many runtime that reschedules kernel threads when a user thread blocks.
 
 ```python

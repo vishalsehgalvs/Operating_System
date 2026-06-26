@@ -338,6 +338,7 @@ Real OS implementations are more complex — they include priority ordering, syn
 > Working code that demonstrates job queue → ready queue → CPU → I/O queue → ready queue flow in practice.
 
 ### C++ — Simple Version
+
 Three-queue model — processes flow from Job Queue through Ready Queue, run on CPU, then wait in I/O Queue.
 
 ```cpp
@@ -422,6 +423,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Full scheduler with all three scheduler roles (long-term, short-term, medium-term swap).
 
 ```cpp
@@ -541,6 +543,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Process lifecycle through job queue → ready queue → CPU → I/O queue → ready queue.
 
 ```python
@@ -610,6 +613,7 @@ print(f"\nAll done at t={clock}")
 ```
 
 ### Python — Medium Level
+
 Scheduler with all three tiers — long-term admission, short-term dispatch, medium-term swap — plus per-process stats.
 
 ```python

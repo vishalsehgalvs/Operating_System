@@ -320,6 +320,7 @@ Two queues:
 > Working code that demonstrates Round Robin and Priority Scheduling with an ASCII Gantt chart in practice.
 
 ### C++ — Simple Version
+
 Round Robin with a configurable time quantum — equal turns for every process.
 
 ```cpp
@@ -401,6 +402,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Priority Scheduling with aging (prevents starvation) + ASCII Gantt chart output.
 
 ```cpp
@@ -510,6 +512,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Round Robin with configurable quantum — equal turns, no starvation.
 
 ```python
@@ -585,6 +588,7 @@ round_robin(procs, quantum=3)
 ```
 
 ### Python — Medium Level
+
 Priority scheduling with aging to prevent starvation, plus ASCII Gantt chart output.
 
 ```python

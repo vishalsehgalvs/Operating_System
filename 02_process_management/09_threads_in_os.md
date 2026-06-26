@@ -334,6 +334,7 @@ wait_for(thread1, thread2, thread3)  // wait for the slowest one
 > Working code that demonstrates threads — creation, shared memory, and differences from processes — in practice.
 
 ### C++ — Simple Version
+
 Create three threads, each doing independent work, then join them back to main.
 
 ```cpp
@@ -372,6 +373,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Multiple threads increment a shared counter — first show the race condition, then fix it with a mutex.
 
 ```cpp
@@ -433,6 +435,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Create multiple threads with `threading.Thread`, each doing independent work.
 
 ```python
@@ -473,6 +476,7 @@ print("\nMain thread: all workers done")
 ```
 
 ### Python — Medium Level
+
 Shared counter with a race condition, then fixed with `threading.Lock` — shows why synchronization matters.
 
 ```python

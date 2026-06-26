@@ -199,6 +199,7 @@ OS designers use several techniques to minimize context switch cost:
 > Working code that demonstrates context switching — saving and restoring process state — in practice.
 
 ### C++ — Simple Version
+
 Save running process's CPU state into its PCB, then restore next process's state from its PCB.
 
 ```cpp
@@ -264,6 +265,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Simulate a scheduler performing N context switches and measure the cumulative overhead.
 
 ```cpp
@@ -355,6 +357,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Save and restore CPU context between two processes — step by step.
 
 ```python
@@ -414,6 +417,7 @@ restore_context(p1)                                # p1 resumes from PC=42
 ```
 
 ### Python — Medium Level
+
 Scheduler simulation measuring total context switch overhead across N processes.
 
 ```python

@@ -329,6 +329,7 @@ Both SJF and SRTF can **starve long processes** — if short processes keep arri
 > Working code that demonstrates FCFS, SJF, and SRTF scheduling algorithms with waiting time and turnaround time calculations in practice.
 
 ### C++ — Simple Version
+
 FCFS scheduler — processes run in arrival order, calculate waiting and turnaround times.
 
 ```cpp
@@ -382,6 +383,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 All three algorithms (FCFS, SJF, SRTF) on the same job set — compare average waiting time.
 
 ```cpp
@@ -498,6 +500,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 FCFS — sort by arrival, run to completion, print waiting time and turnaround time table.
 
 ```python
@@ -538,6 +541,7 @@ fcfs(procs)
 ```
 
 ### Python — Medium Level
+
 All three algorithms (FCFS, SJF, SRTF) with a comparison table — classic interview problem.
 
 ```python

@@ -232,6 +232,7 @@ Preemption (Running → Ready) lets high-priority processes cut in line, prevent
 > Working code that demonstrates process state transitions in practice.
 
 ### C++ — Simple Version
+
 Process class with five states and guarded transition methods.
 
 ```cpp
@@ -316,6 +317,7 @@ int main() {
 ```
 
 ### C++ — Medium / LeetCode Style
+
 Round-robin scheduler loop driving all five state transitions for multiple processes simultaneously.
 
 ```cpp
@@ -394,6 +396,7 @@ int main() {
 ```
 
 ### Python — Simple Version
+
 Process with state validation — only legal transitions are allowed.
 
 ```python
@@ -439,6 +442,7 @@ print(f"\nFinal: {p.state}")
 ```
 
 ### Python — Medium Level
+
 Round-robin scheduler showing all transitions across multiple processes with turnaround time stats.
 
 ```python

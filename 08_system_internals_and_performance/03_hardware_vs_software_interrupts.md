@@ -1,0 +1,375 @@
+# Hardware vs Software Interrupts in OS
+
+> An **interrupt** is a signal to the CPU to stop what it's doing and handle something more urgent — **hardware interrupts** come from physical devices (keyboard, timer, disk) and arrive asynchronously at any time, while **software interrupts** (traps/exceptions) are triggered by program instructions at predictable points for system calls or error handling.
+
+---
+
+## Table of Contents
+
+1. [What is an Interrupt?](#1-what-is-an-interrupt)
+2. [Why Interrupts Exist: Interrupts vs Polling](#2-why-interrupts-exist-interrupts-vs-polling)
+3. [Hardware Interrupts](#3-hardware-interrupts)
+4. [Software Interrupts (Traps and Exceptions)](#4-software-interrupts-traps-and-exceptions)
+5. [How Interrupt Handling Works: Step by Step](#5-how-interrupt-handling-works-step-by-step)
+6. [Interrupt Service Routine (ISR)](#6-interrupt-service-routine-isr)
+7. [Interrupt Priority and Masking](#7-interrupt-priority-and-masking)
+8. [Hardware vs Software Interrupts Comparison](#8-hardware-vs-software-interrupts-comparison)
+9. [Interrupts and Context Switching](#9-interrupts-and-context-switching)
+10. [Key Takeaways](#10-key-takeaways)
+
+---
+
+## 1. What is an Interrupt?
+
+An **interrupt** is a signal that tells the CPU: "Stop what you're doing, save your state, and handle this event now. When done, return to where you were."
+
+```
+  CPU executing Process A:
+  [instr 1] → [instr 2] → [instr 3] ...
+
+                                 ← Hardware interrupt arrives (key pressed!)
+
+  CPU:
+  1. Finishes current instruction (doesn't split an instruction)
+  2. Saves current state (PC, registers) → to stack or PCB
+  3. Jumps to interrupt handler (ISR)
+  4. ISR runs: reads key, stores in buffer, ACKs keyboard controller
+  5. ISR returns
+  6. CPU restores saved state
+  7. Resumes Process A at exactly where it was interrupted
+```
+
+**Analogy:** You're reading a book. Your phone rings (interrupt). You put your finger on the page (save state), pick up the call (run ISR), hang up, go back to the exact page and line you were on (restore state + resume).
+
+---
+
+## 2. Why Interrupts Exist: Interrupts vs Polling
+
+**Before interrupts: Polling** — the CPU constantly checks every device to see if it needs attention.
+
+```
+  Polling loop (wasteful!):
+
+  while (true) {
+      if (keyboard_has_input())    handle_keyboard();
+      if (disk_transfer_done())    handle_disk();
+      if (network_packet_arrived()) handle_network();
+      if (timer_expired())          handle_timer();
+      // ... check 50 more devices ...
+  }
+
+  Problem: CPU wastes 99% of its time checking devices that have nothing to report.
+  Most key presses happen less than 10 times per second.
+  CPU runs at 3+ billion cycles per second.
+
+  With interrupts: CPU does REAL work → device signals when needed → CPU handles it → back to real work
+```
+
+| Aspect              | Polling                                                                | Interrupts                                    |
+| ------------------- | ---------------------------------------------------------------------- | --------------------------------------------- |
+| **CPU utilization** | Wastes cycles checking idle devices                                    | CPU only responds when actually needed        |
+| **Response time**   | Depends on polling frequency                                           | Near-immediate                                |
+| **Complexity**      | Simple loop                                                            | Requires ISR setup + interrupt vector table   |
+| **Efficiency**      | Low                                                                    | High                                          |
+| **Best for**        | Very fast devices needing constant attention (e.g., some network NICs) | Most devices (keyboard, disk, timer, network) |
+
+---
+
+## 3. Hardware Interrupts
+
+**Source:** Physical hardware devices.  
+**Timing:** **Asynchronous** — can arrive at ANY point during CPU execution, regardless of what instruction is running.
+
+### How Hardware Interrupts Are Generated
+
+```
+  Device action → Device controller raises IRQ line on CPU/interrupt controller
+
+  Example: Keyboard key press
+  1. User presses 'A'
+  2. Keyboard controller detects key
+  3. Keyboard controller raises IRQ1 line (dedicated interrupt line)
+  4. PIC/APIC (Programmable Interrupt Controller) notices IRQ1 is asserted
+  5. If interrupts are enabled: PIC sends INT signal to CPU
+  6. CPU reads interrupt vector number from PIC (e.g., vector 33)
+  7. CPU looks up ISR address in Interrupt Descriptor Table (IDT)
+  8. CPU jumps to keyboard ISR
+  9. ISR reads scan code from keyboard I/O port, stores in buffer
+  10. ISR sends EOI (End Of Interrupt) to PIC
+  11. CPU returns from ISR to interrupted code
+```
+
+### Common Hardware Interrupt Sources
+
+| Interrupt           | IRQ          | Generated By                      | Purpose                                    |
+| ------------------- | ------------ | --------------------------------- | ------------------------------------------ |
+| **Timer interrupt** | IRQ0         | System timer chip (every 1–10 ms) | Preemptive scheduling, system clock update |
+| **Keyboard**        | IRQ1         | Keyboard controller               | Key press/release detection                |
+| **COM2 (serial)**   | IRQ3         | Serial port                       | Serial data received                       |
+| **COM1 (serial)**   | IRQ4         | Serial port                       | Serial data received                       |
+| **Disk controller** | IRQ14/15     | IDE/ATA disk                      | I/O operation complete                     |
+| **Network card**    | IRQ (varies) | NIC                               | Packet received / sent                     |
+| **USB controller**  | IRQ (varies) | USB host controller               | USB device event                           |
+| **Sound card**      | IRQ (varies) | Audio chip                        | Audio buffer needs refill                  |
+
+**Timer interrupt is the most important** — it's how the OS implements preemptive multitasking. Every ~10 ms, the timer fires, the OS scheduler gets control, and it can switch to a different process.
+
+---
+
+## 4. Software Interrupts (Traps and Exceptions)
+
+**Source:** CPU itself, triggered by executing specific instructions or detecting error conditions.  
+**Timing:** **Synchronous** — occur at deterministic, predictable points in program execution.
+
+Software interrupts come in two subtypes:
+
+### Traps (Intentional Software Interrupts)
+
+Used when a program intentionally requests OS services (system calls).
+
+```c
+// User program wants to read a file:
+read(fd, buffer, 100);
+
+// Internally, read() library wrapper does:
+// 1. Put syscall number in register (e.g., rax = 0 on x86-64 Linux)
+// 2. Put arguments in registers (rdi=fd, rsi=buffer, rdx=100)
+// 3. Execute SYSCALL instruction
+//    → CPU switches to kernel mode
+//    → Kernel handles the file read
+//    → Returns result in rax
+//    → CPU switches back to user mode
+// 4. Library returns rax to the calling program
+```
+
+| Platform     | System call instruction                   |
+| ------------ | ----------------------------------------- |
+| x86-64 Linux | `SYSCALL` (modern) or `INT 0x80` (legacy) |
+| x86 Windows  | `SYSENTER` or `INT 0x2E`                  |
+| ARM64        | `SVC` (Supervisor Call)                   |
+| RISC-V       | `ECALL`                                   |
+
+### Exceptions (Unintentional Software Interrupts)
+
+Generated by the CPU when a program does something illegal or encounters an error condition.
+
+| Exception                        | When it occurs                                     | OS Response                                    |
+| -------------------------------- | -------------------------------------------------- | ---------------------------------------------- |
+| **Divide by zero**               | `int x = 5 / 0;`                                   | SIGFPE signal → terminate with error           |
+| **Segmentation fault (SIGSEGV)** | `*null_ptr = 5;` (null dereference)                | SIGSEGV signal → terminate                     |
+| **Page fault**                   | Access page not in RAM                             | Load page from disk (demand paging) → continue |
+| **Invalid opcode**               | Execute bytes not corresponding to any instruction | SIGILL → terminate                             |
+| **Stack overflow**               | Infinite recursion exhausts stack memory           | SIGSEGV → terminate                            |
+| **General protection fault**     | Access kernel memory from user mode, etc.          | SIGSEGV / terminate                            |
+
+**Page fault is special** — it's a "fixable" exception. The OS handles it by loading the missing page from swap space or file (demand paging), then the program continues normally without ever knowing it happened.
+
+---
+
+## 5. How Interrupt Handling Works: Step by Step
+
+```
+  An interrupt arrives (hardware or software):
+
+  Step 1: CPU finishes current instruction (atomic completion)
+
+  Step 2: CPU saves processor state
+          - Program Counter (return address)
+          - Registers (flags, general-purpose)
+          - Stack pointer
+          → Saved to stack (x86) or to special registers (ARM)
+
+  Step 3: CPU temporarily disables further interrupts
+          (to prevent interrupt-within-interrupt chaos)
+
+  Step 4: CPU reads interrupt/exception number
+          - Hardware: from PIC/APIC interrupt vector
+          - Software: from CPU exception number or SYSCALL number
+
+  Step 5: CPU looks up handler address in IDT/IVT
+          (Interrupt Descriptor Table — a kernel-maintained table
+          mapping vector number → handler function address)
+
+  Step 6: CPU jumps to the ISR (Interrupt Service Routine)
+          and begins executing in kernel mode
+
+  Step 7: ISR executes:
+          - Handles the event (reads key, processes I/O, handles syscall, etc.)
+          - May re-enable interrupts if appropriate (nested interrupts)
+
+  Step 8: ISR sends EOI (End Of Interrupt) to PIC (for hardware IRQs)
+
+  Step 9: ISR executes IRET (Interrupt Return) instruction
+
+  Step 10: CPU restores saved state
+           - Restores registers, PC, flags, stack pointer
+           - Switches back to user mode (for software interrupts/exceptions)
+           - Re-enables interrupts
+
+  Step 11: CPU resumes executing interrupted code at the next instruction
+```
+
+---
+
+## 6. Interrupt Service Routine (ISR)
+
+An **ISR** (also called Interrupt Handler) is the function the OS registers to handle a specific interrupt.
+
+**Key requirements for ISRs:**
+
+- Must be **fast** — interrupts are disabled while ISR runs (other events are delayed)
+- Must be **reentrant-safe** (may share data with interrupted code)
+- Must acknowledge the interrupt (send EOI to PIC for hardware interrupts)
+
+**Conceptual keyboard ISR:**
+
+```c
+// Called when keyboard IRQ fires (IRQ1 = vector 33 on x86)
+void keyboard_isr(void) {
+    // 1. Read the scan code from keyboard I/O port
+    uint8_t scan_code = inb(0x60);   // read from I/O port 0x60
+
+    // 2. Convert scan code to a character (key mapping)
+    char key = scan_code_to_char(scan_code);
+
+    // 3. Add character to keyboard input buffer (ring buffer)
+    keyboard_buffer_push(key);
+
+    // 4. Wake up any process waiting for keyboard input
+    wake_up_waiting_process();
+
+    // 5. Acknowledge the interrupt (tell PIC we're done)
+    outb(0x20, 0x20);  // send EOI to PIC
+
+    // IRET instruction returns to interrupted code
+}
+```
+
+**Timer ISR (most important for multitasking):**
+
+```c
+void timer_isr(void) {
+    // 1. Update system clock
+    system_ticks++;
+    current_time = ticks_to_time(system_ticks);
+
+    // 2. Check if any sleeping processes should wake up
+    wake_expired_timers();
+
+    // 3. Decrement current process's time quantum
+    current_process->remaining_quantum--;
+
+    // 4. If quantum expired → trigger scheduler (preemption!)
+    if (current_process->remaining_quantum == 0) {
+        schedule();   // pick next process, do context switch
+    }
+
+    // 5. ACK interrupt
+    outb(0x20, 0x20);
+}
+// This runs every 10 ms → 100 chances per second for the OS to regain control
+```
+
+---
+
+## 7. Interrupt Priority and Masking
+
+Not all interrupts are equal. Critical events must be handled before less urgent ones.
+
+```
+  Interrupt priority hierarchy (approximate, x86):
+
+  High   NMI (Non-Maskable Interrupt) — power failure, hardware error
+         ↓
+         INTR from APIC (hardware interrupts by priority)
+         ↓
+         Software exceptions (page fault, GPF, etc.)
+         ↓
+  Low    SYSCALL (system calls)
+```
+
+### Maskable vs Non-Maskable Interrupts
+
+| Type                              | Can be disabled?                             | Used for                                      |
+| --------------------------------- | -------------------------------------------- | --------------------------------------------- |
+| **Maskable interrupts**           | Yes (via CLI instruction or setting IF flag) | Most hardware IRQs                            |
+| **Non-maskable interrupts (NMI)** | No — always delivered                        | Hardware failures, watchdog timers, debugging |
+
+**Interrupt masking for critical sections:**
+
+```c
+// Critical section: updating a data structure that must not be interrupted mid-way
+// (kernel code example)
+
+cli();   // disable interrupts (set IF=0 in EFLAGS)
+
+// ── CRITICAL SECTION ─────────────────────────────
+// Update page tables, modify PCB, update scheduler queues, etc.
+// Any interrupt arriving here is HELD until we re-enable
+// ─────────────────────────────────────────────────
+
+sti();   // re-enable interrupts (set IF=1 in EFLAGS)
+// Pending interrupts now delivered
+```
+
+---
+
+## 8. Hardware vs Software Interrupts Comparison
+
+| Aspect               | Hardware Interrupts                                  | Software Interrupts (Traps/Exceptions)                 |
+| -------------------- | ---------------------------------------------------- | ------------------------------------------------------ |
+| **Source**           | External devices (keyboard, timer, disk, NIC)        | Program instruction or CPU error detection             |
+| **Timing**           | Asynchronous (unpredictable)                         | Synchronous (at specific instruction)                  |
+| **CPU prediction**   | Cannot predict when                                  | Can predict exactly when (for traps)                   |
+| **Examples**         | Key press, disk I/O done, timer tick, packet arrived | `read()` syscall, divide-by-zero, page fault, segfault |
+| **Purpose**          | Notify CPU of external device event                  | Request OS services OR handle program error            |
+| **Initiated by**     | Hardware controller → IRQ line → PIC/APIC            | CPU exception or `SYSCALL`/`INT` instruction           |
+| **Priority**         | Usually high                                         | Usually lower (except NMI)                             |
+| **Can be disabled?** | Maskable: yes; NMI: no                               | Usually cannot be disabled                             |
+| **System call?**     | No                                                   | Traps ARE system calls                                 |
+
+---
+
+## 9. Interrupts and Context Switching
+
+Interrupts are the primary mechanism enabling **preemptive multitasking**.
+
+```
+  Timer interrupt fires every 10 ms
+
+  [Process A running]
+         ↓ timer fires (hardware interrupt)
+
+  OS interrupt handler:
+  1. Saves Process A's full state (registers, PC) → into A's PCB
+  2. Runs scheduler → picks Process B (has waited longest, high priority, etc.)
+  3. Loads Process B's state from B's PCB
+  4. IRET → CPU resumes at B's saved PC → Process B runs
+
+  [Process B running]
+         ↓ timer fires again
+
+  OS saves B → picks C → runs C ...
+
+  Repeat every 10 ms → "simultaneous" execution illusion for all processes
+```
+
+**Without interrupts:** the OS would only get control when processes voluntarily call `yield()` — that's cooperative multitasking (old Mac OS, old Windows 3.x, coroutines). Buggy programs could freeze the entire system.
+
+**With interrupts:** OS gets control every 10 ms regardless → preemptive scheduling → no single process can hog the CPU.
+
+---
+
+## 10. Key Takeaways
+
+- **Interrupt** = signal to CPU to pause current work, handle urgent event, then resume — CPU finishes current instruction first, then saves state, runs ISR, restores state, continues
+- **Hardware interrupts** come from physical devices (keyboard, timer, disk, NIC), are **asynchronous** (arrive at any time), generated by device raising an IRQ line on the PIC/APIC
+- **Software interrupts** come from program instructions — **traps** (intentional: system calls via `SYSCALL`/`INT 0x80`) and **exceptions** (unintentional: divide-by-zero, page fault, segfault)
+- **Asynchronous** (hardware) = unpredictable timing; **Synchronous** (software) = predictable, at specific instruction
+- **Polling** = CPU constantly checks devices — wasteful; **Interrupts** = devices signal CPU when needed — efficient
+- **ISR (Interrupt Service Routine)** = fast handler function for a specific interrupt; must be short (interrupts disabled while running), must ACK the interrupt
+- **Interrupt Descriptor Table (IDT)** = kernel table mapping interrupt vector number → ISR address
+- **Maskable interrupts** can be temporarily disabled (for critical sections); **NMI (Non-Maskable)** cannot be disabled
+- **Timer interrupt** (every ~10 ms) is the foundation of preemptive scheduling — gives OS control to run scheduler even if process doesn't cooperate
+- **Page fault** is a special "fixable" exception — OS loads missing page from disk, process resumes transparently
+- **System call = intentional software interrupt** — program issues `SYSCALL`/`SVC` → CPU switches to kernel mode → OS handles request → returns to user mode

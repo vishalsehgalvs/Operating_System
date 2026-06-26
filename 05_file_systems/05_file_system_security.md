@@ -317,6 +317,283 @@ Audit logs record: timestamp, user, action type, file path, result (success/deni
 
 ---
 
+## 10. Code Examples
+
+> Working code that demonstrates file system access control in practice.
+
+### C++ — Simple Version
+Simulate Unix permission bits check — decode and enforce owner/group/other access.
+
+```cpp
+#include <iostream>
+#include <vector>
+#include <string>
+using namespace std;
+
+// File entry with Unix permission string (9 chars: "rwxrwxrwx")
+struct FileEntry {
+    string name;
+    string owner;
+    string ownerGroup;
+    string permissions;  // layout: [0-2]=owner [3-5]=group [6-8]=other
+};
+
+// Decode one permission triplet to human-readable form
+string decodeTriplet(const string& p, int base) {
+    string s;
+    if (p[base+0] != '-') s += "read ";
+    if (p[base+1] != '-') s += "write ";
+    if (p[base+2] != '-') s += "exec";
+    return s.empty() ? "none" : s;
+}
+
+void explainPermissions(const FileEntry& f) {
+    cout << "Permissions for '" << f.name << "' (" << f.permissions << "):\n";
+    cout << "  Owner (" << f.owner       << "): " << decodeTriplet(f.permissions, 0) << "\n";
+    cout << "  Group (" << f.ownerGroup  << "): " << decodeTriplet(f.permissions, 3) << "\n";
+    cout << "  Other:             " << decodeTriplet(f.permissions, 6) << "\n";
+}
+
+// Determine if user/group can perform action ('r','w','x')
+bool checkAccess(const FileEntry& f, const string& user,
+                 const string& group, char action) {
+    int base   = (user  == f.owner)      ? 0 :
+                 (group == f.ownerGroup) ? 3 : 6;
+    int offset = (action == 'r') ? 0 : (action == 'w') ? 1 : 2;
+    return f.permissions[base + offset] != '-';
+}
+
+int main() {
+    FileEntry f{"payroll.csv", "admin", "hr", "rw-r-----"};
+    explainPermissions(f);
+
+    struct Test { string user, group; char action; };
+    vector<Test> tests = {
+        {"admin",  "hr",    'r'},  // owner read
+        {"admin",  "hr",    'w'},  // owner write
+        {"hr_bob", "hr",    'r'},  // group read
+        {"hr_bob", "hr",    'w'},  // group write — denied
+        {"guest",  "guest", 'r'},  // other — denied
+    };
+
+    cout << "\nAccess decisions:\n";
+    for (auto& t : tests) {
+        bool ok = checkAccess(f, t.user, t.group, t.action);
+        cout << "  " << t.user << " (" << t.group << ") "
+             << t.action << ": " << (ok ? "ALLOWED" : "DENIED") << "\n";
+    }
+    return 0;
+}
+```
+
+### C++ — Medium / LeetCode Style
+Multi-layer access control: Unix DAC + ACL + mandatory security label (Bell-LaPadula style).
+
+```cpp
+#include <iostream>
+#include <unordered_map>
+#include <set>
+#include <vector>
+#include <string>
+using namespace std;
+
+enum class Label { PUBLIC = 0, INTERNAL = 1, CONFIDENTIAL = 2 };
+string labelName(Label l) {
+    return l == Label::PUBLIC ? "public" :
+           l == Label::INTERNAL ? "internal" : "confidential";
+}
+
+struct SecureFile {
+    string name, owner, ownerGroup, unixPerms;
+    Label  label;
+    unordered_map<string, set<char>> acl;  // user -> {r,w,x}
+};
+
+struct User { string name, group; Label clearance; };
+
+bool unixCheck(const SecureFile& f, const User& u, char action) {
+    int base   = (u.name == f.owner) ? 0 : (u.group == f.ownerGroup) ? 3 : 6;
+    int offset = (action == 'r') ? 0 : (action == 'w') ? 1 : 2;
+    return f.unixPerms[base + offset] != '-';
+}
+
+bool checkAccess(const SecureFile& f, const User& u, char action) {
+    // Layer 1: Mandatory label check (Bell-LaPadula "no read up")
+    if ((int)u.clearance < (int)f.label) {
+        cout << "  [MAC DENY] " << u.name << " clearance=" << labelName(u.clearance)
+             << " < file=" << labelName(f.label) << "\n";
+        return false;
+    }
+    // Layer 2: ACL (explicit per-user grant overrides unix bits)
+    auto it = f.acl.find(u.name);
+    if (it != f.acl.end()) return it->second.count(action) > 0;
+    // Layer 3: Unix DAC
+    return unixCheck(f, u, action);
+}
+
+int main() {
+    SecureFile file{"strategy.pdf", "ceo", "exec", "rwx------",
+                    Label::CONFIDENTIAL,
+                    {{"bob", {'r'}}}};  // bob gets explicit read via ACL
+
+    vector<User> users = {
+        {"ceo",    "exec",     Label::CONFIDENTIAL},
+        {"bob",    "dev",      Label::CONFIDENTIAL},  // ACL allows read
+        {"carol",  "dev",      Label::INTERNAL},      // clearance too low
+        {"intern", "external", Label::PUBLIC},
+    };
+
+    cout << "Access decisions (read 'r'):\n";
+    for (auto& u : users) {
+        bool ok = checkAccess(file, u, 'r');
+        cout << "  " << u.name << ": " << (ok ? "ALLOWED" : "DENIED") << "\n";
+    }
+    return 0;
+}
+```
+
+### Python — Simple Version
+Decode and enforce Unix permission bits (owner/group/other rwx).
+
+```python
+# Simulate Unix permission bits check for file access control
+
+def check_unix_permission(permissions: str, user: str, group: str,
+                           owner: str, owner_group: str, action: str) -> bool:
+    """
+    permissions: 9-char string "rwxrwxrwx" (owner/group/other)
+    action: 'r', 'w', or 'x'
+    Decision: owner bits first, then group, then other.
+    """
+    if   user  == owner:       base = 0  # owner triplet
+    elif group == owner_group: base = 3  # group triplet
+    else:                      base = 6  # other triplet
+
+    offset = {'r': 0, 'w': 1, 'x': 2}[action]
+    return permissions[base + offset] != '-'
+
+def decode_permissions(perm_str: str) -> dict:
+    """Return human-readable breakdown of a 9-char permission string."""
+    labels = ['owner', 'group', 'other']
+    return {
+        labels[i]: {
+            'read':    perm_str[i*3 + 0] != '-',
+            'write':   perm_str[i*3 + 1] != '-',
+            'execute': perm_str[i*3 + 2] != '-',
+        }
+        for i in range(3)
+    }
+
+# --- Demo ---
+file_info = {
+    "name":        "financial_report.pdf",
+    "owner":       "cfo",
+    "owner_group": "finance",
+    "permissions": "rw-r-----",  # owner: rw-, group: r--, other: ---
+}
+
+print(f"File: {file_info['name']}  Perms: {file_info['permissions']}")
+print("Decoded:", decode_permissions(file_info['permissions']))
+
+print("\nAccess audit:")
+for user, group, action in [
+    ("cfo",      "finance",  "r"),  # owner read   -> ALLOWED
+    ("cfo",      "finance",  "w"),  # owner write  -> ALLOWED
+    ("analyst",  "finance",  "r"),  # group read   -> ALLOWED
+    ("analyst",  "finance",  "w"),  # group write  -> DENIED
+    ("auditor",  "external", "r"),  # other        -> DENIED
+]:
+    allowed = check_unix_permission(
+        file_info["permissions"], user, group,
+        file_info["owner"], file_info["owner_group"], action
+    )
+    print(f"  {user:10} ({group:8}) action={action}: {'ALLOWED' if allowed else 'DENIED'}")
+```
+
+### Python — Medium Level
+Multi-layer access control: Unix bits + ACL + mandatory security clearance level.
+
+```python
+from enum import IntEnum
+from dataclasses import dataclass, field
+from typing import Dict, Set
+
+class Label(IntEnum):
+    PUBLIC       = 0
+    INTERNAL     = 1
+    CONFIDENTIAL = 2
+
+@dataclass
+class SecureFile:
+    name:        str
+    owner:       str
+    owner_group: str
+    unix_perms:  str          # "rwxrwxrwx"
+    label:       Label = Label.INTERNAL
+    acl:         Dict[str, Set[str]] = field(default_factory=dict)
+
+@dataclass
+class User:
+    name:      str
+    group:     str
+    clearance: Label
+
+class SecureACLSystem:
+    def __init__(self):
+        self.files: Dict[str, SecureFile] = {}
+        self.users: Dict[str, User]       = {}
+
+    def add_file(self, f: SecureFile): self.files[f.name] = f
+    def add_user(self, u: User):       self.users[u.name] = u
+
+    def _unix(self, f: SecureFile, u: User, action: str) -> bool:
+        offset = {'r': 0, 'w': 1, 'x': 2}[action]
+        if u.name == f.owner:            return f.unix_perms[offset]     != '-'
+        elif u.group == f.owner_group:   return f.unix_perms[3 + offset] != '-'
+        else:                            return f.unix_perms[6 + offset] != '-'
+
+    def check(self, fname: str, uname: str, action: str) -> bool:
+        f = self.files.get(fname); u = self.users.get(uname)
+        if not f or not u: return False
+
+        # Layer 1: Mandatory clearance (no-read-up rule)
+        if u.clearance < f.label:
+            print(f"  {uname:8} DENIED [MAC: {u.clearance.name} < {f.label.name}]")
+            return False
+
+        # Layer 2: Explicit ACL
+        if uname in f.acl:
+            ok = action in f.acl[uname]
+            print(f"  {uname:8} {'ALLOWED' if ok else 'DENIED':7} [ACL]")
+            return ok
+
+        # Layer 3: Unix DAC
+        ok = self._unix(f, u, action)
+        print(f"  {uname:8} {'ALLOWED' if ok else 'DENIED':7} [Unix DAC]")
+        return ok
+
+# --- Demo ---
+sys = SecureACLSystem()
+sys.add_file(SecureFile(
+    name="strategy.docx", owner="ceo", owner_group="exec",
+    unix_perms="rwx------", label=Label.CONFIDENTIAL,
+    acl={"bob": {"r"}}   # bob: explicit read-only
+))
+for u in [
+    User("ceo",    "exec",     Label.CONFIDENTIAL),
+    User("bob",    "dev",      Label.CONFIDENTIAL),   # ACL read
+    User("carol",  "dev",      Label.CONFIDENTIAL),   # unix: other
+    User("intern", "external", Label.INTERNAL),       # clearance too low
+]:
+    sys.add_user(u)
+
+print("=== Read access decisions ===")
+for uname in ["ceo", "bob", "carol", "intern"]:
+    sys.check("strategy.docx", uname, "r")
+```
+
+---
+
 ## 11. Key Takeaways
 
 - **File system security** enforces Confidentiality, Integrity, and Availability (CIA triad) for stored data

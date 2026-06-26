@@ -265,6 +265,271 @@ Without ACL: bob and alice would get identical permissions since they're both in
 
 ---
 
+## 8. Code Examples
+
+> Working code that demonstrates FCB metadata, Unix permission bits, and ACL-based access control in practice.
+
+### C++ — Simple Version
+Simulate a File Control Block (FCB) and check Unix-style permission bits.
+
+```cpp
+#include <iostream>
+#include <string>
+#include <ctime>
+using namespace std;
+
+// ======== FCB (File Control Block) ========
+// Holds all metadata the OS keeps about a file
+struct FCB {
+    string name;
+    int    size;         // bytes
+    string owner;
+    string ownerGroup;
+    string permissions;  // 9-char Unix string: "rwxrwxrwx"
+    time_t created;
+    time_t modified;
+
+    void print() const {
+        cout << "File: " << name
+             << "  Size: " << size << "B"
+             << "  Owner: " << owner << ":" << ownerGroup
+             << "  Perms: " << permissions << "\n";
+    }
+};
+
+// ======== Unix Permission Check ========
+// permissions layout: positions 0-2 = owner, 3-5 = group, 6-8 = other
+// 'r'=offset 0, 'w'=offset 1, 'x'=offset 2 within each triplet
+bool checkPermission(const FCB& f, const string& user,
+                     const string& group, char action) {
+    int base = (user  == f.owner)      ? 0 :
+               (group == f.ownerGroup) ? 3 : 6;
+    int offset = (action == 'r') ? 0 : (action == 'w') ? 1 : 2;
+    return f.permissions[base + offset] != '-';
+}
+
+int main() {
+    FCB file{"secret.txt", 1024, "alice", "devs",
+             "rwxr-x---", time(nullptr), time(nullptr)};
+    file.print();
+
+    struct Test { string user, group; char action; };
+    Test tests[] = {
+        {"alice", "devs",  'r'},  // owner
+        {"alice", "devs",  'w'},  // owner
+        {"bob",   "devs",  'r'},  // group member
+        {"bob",   "devs",  'w'},  // group member — no write for group
+        {"eve",   "guest", 'r'},  // other — no access
+    };
+    cout << "\nAccess decisions:\n";
+    for (auto& t : tests) {
+        bool ok = checkPermission(file, t.user, t.group, t.action);
+        cout << "  " << t.user << " (" << t.group << ") " << t.action
+             << ": " << (ok ? "ALLOWED" : "DENIED") << "\n";
+    }
+    return 0;
+}
+```
+
+### C++ — Medium / LeetCode Style
+Simulate an ACL system where per-user entries override Unix permission bits.
+
+```cpp
+#include <iostream>
+#include <unordered_map>
+#include <set>
+#include <vector>
+#include <string>
+using namespace std;
+
+struct FCB {
+    string name, owner, ownerGroup, unixPerms;
+};
+
+// ACL entry: username -> set of allowed actions {'r','w','x'}
+using ACL = unordered_map<string, set<char>>;
+
+struct FileRecord { FCB fcb; ACL acl; };
+
+class ACLFileSystem {
+    unordered_map<string, FileRecord> files;
+public:
+    void createFile(const string& name, const string& owner,
+                    const string& group, const string& perms) {
+        files[name] = {FCB{name, owner, group, perms}, {}};
+        cout << "Created '" << name << "' (" << owner << ":" << group
+             << " " << perms << ")\n";
+    }
+
+    void setACL(const string& fname, const string& user, const string& perms) {
+        files[fname].acl[user] = set<char>(perms.begin(), perms.end());
+        cout << "ACL set: '" << fname << "' -> " << user << "=" << perms << "\n";
+    }
+
+    bool checkAccess(const string& fname, const string& user,
+                     const string& group, char action) {
+        auto it = files.find(fname);
+        if (it == files.end()) return false;
+        const auto& rec = it->second;
+        const FCB&  fcb = rec.fcb;
+
+        // 1. Explicit ACL overrides Unix bits
+        auto aclIt = rec.acl.find(user);
+        if (aclIt != rec.acl.end())
+            return aclIt->second.count(action) > 0;
+
+        // 2. Fall back to Unix permission bits
+        int base   = (user  == fcb.owner)      ? 0 :
+                     (group == fcb.ownerGroup) ? 3 : 6;
+        int offset = (action == 'r') ? 0 : (action == 'w') ? 1 : 2;
+        return fcb.unixPerms[base + offset] != '-';
+    }
+};
+
+int main() {
+    ACLFileSystem aclfs;
+    aclfs.createFile("report.pdf", "alice", "developers", "rwxr-x---");
+    aclfs.setACL("report.pdf", "bob", "r");  // bob: read-only via ACL
+
+    cout << "\nAccess decisions:\n";
+    struct T { string user, group; char action; };
+    for (auto& t : vector<T>{
+            {"alice", "developers", 'w'},  // owner -> unix: ALLOWED
+            {"bob",   "developers", 'r'},  // ACL: ALLOWED
+            {"bob",   "developers", 'w'},  // ACL: DENIED (no 'w')
+            {"carol", "developers", 'r'},  // unix group: ALLOWED
+            {"eve",   "guest",      'r'},  // other: DENIED
+    }) {
+        bool ok = aclfs.checkAccess("report.pdf", t.user, t.group, t.action);
+        cout << "  " << t.user << " (" << t.group << ") " << t.action
+             << ": " << (ok ? "ALLOWED" : "DENIED") << "\n";
+    }
+    return 0;
+}
+```
+
+### Python — Simple Version
+FCB dataclass with a Unix permission checker function.
+
+```python
+from dataclasses import dataclass, field
+from datetime import datetime
+
+@dataclass
+class FCB:
+    """File Control Block — all metadata the OS keeps about a file."""
+    name:        str
+    size:        int          # bytes
+    owner:       str
+    owner_group: str
+    permissions: str          # 9-char Unix string, e.g. "rwxr-x---"
+    created_at:  str = field(default_factory=lambda: datetime.now().strftime("%Y-%m-%d"))
+    modified_at: str = field(default_factory=lambda: datetime.now().strftime("%Y-%m-%d"))
+
+    def display(self):
+        print(f"  {self.permissions}  {self.owner}:{self.owner_group}  "
+              f"{self.size:6}B  {self.name}  [{self.created_at}]")
+
+def check_permission(fcb: FCB, user: str, group: str, action: str) -> bool:
+    """
+    Check if user/group can do action ('r','w','x') on file.
+    Permissions layout: positions 0-2=owner, 3-5=group, 6-8=other
+    """
+    offset = {'r': 0, 'w': 1, 'x': 2}[action]
+    if   user  == fcb.owner:       base = 0   # owner triplet
+    elif group == fcb.owner_group: base = 3   # group triplet
+    else:                          base = 6   # other triplet
+    return fcb.permissions[base + offset] != '-'
+
+# --- Demo ---
+fcb = FCB("secret.txt", 2048, "alice", "dev", "rwxr-x---")
+fcb.display()
+
+print("\nAccess checks:")
+for user, grp, action in [
+    ("alice", "dev",   "r"),  # owner read
+    ("alice", "dev",   "w"),  # owner write
+    ("bob",   "dev",   "r"),  # group read
+    ("bob",   "dev",   "w"),  # group write — denied
+    ("eve",   "guest", "r"),  # other — denied
+]:
+    result = check_permission(fcb, user, grp, action)
+    print(f"  {user:6} ({grp:6}) {action}: {'ALLOWED' if result else 'DENIED'}")
+```
+
+### Python — Medium Level
+ACL system where per-user entries override Unix permission bits, with a full access decision log.
+
+```python
+from dataclasses import dataclass, field
+from typing import Dict, Set
+
+@dataclass
+class FCB:
+    name: str; size: int; owner: str; owner_group: str; unix_perms: str
+
+@dataclass
+class FileRecord:
+    fcb: FCB
+    acl: Dict[str, Set[str]] = field(default_factory=dict)  # user -> {r,w,x}
+
+class ACLFileSystem:
+    def __init__(self):
+        self.files: Dict[str, FileRecord] = {}
+
+    def create(self, name, owner, group, perms="rw-r--r--"):
+        self.files[name] = FileRecord(FCB(name, 0, owner, group, perms))
+        print(f"Created '{name}'  {owner}:{group}  {perms}")
+
+    def set_acl(self, fname, user, perms: str):
+        """Grant user-specific permissions (overrides Unix bits)."""
+        if fname in self.files:
+            self.files[fname].acl[user] = set(perms)
+            print(f"ACL: '{fname}' -> {user} = '{perms}'")
+
+    def check(self, fname, user, group, action: str) -> bool:
+        """
+        Decision order:
+          1. Explicit ACL entry (highest priority)
+          2. Unix owner / group / other bits
+        """
+        if fname not in self.files: return False
+        rec, fcb = self.files[fname], self.files[fname].fcb
+        offset = {'r': 0, 'w': 1, 'x': 2}[action]
+
+        # 1. ACL check
+        if user in rec.acl:
+            return action in rec.acl[user]
+
+        # 2. Unix bits fallback
+        if user == fcb.owner:            return fcb.unix_perms[offset]     != '-'
+        elif group == fcb.owner_group:   return fcb.unix_perms[3 + offset] != '-'
+        else:                            return fcb.unix_perms[6 + offset] != '-'
+
+    def audit(self, fname, tests):
+        print(f"\nAccess audit for '{fname}':")
+        for user, group, action in tests:
+            r = self.check(fname, user, group, action)
+            src = "ACL" if user in self.files[fname].acl else "Unix"
+            print(f"  {user:8} ({group:10}) {action}: {'ALLOWED' if r else 'DENIED':7} [{src}]")
+
+# --- Demo ---
+aclfs = ACLFileSystem()
+aclfs.create("budget.xlsx", "alice", "finance", "rwxr-x---")
+aclfs.set_acl("budget.xlsx", "bob",   "r")    # bob: read-only via ACL
+aclfs.set_acl("budget.xlsx", "carol", "rw")   # carol: read+write via ACL
+
+aclfs.audit("budget.xlsx", [
+    ("alice", "finance", "w"),   # owner -> unix ALLOWED
+    ("bob",   "finance", "r"),   # ACL ALLOWED
+    ("bob",   "finance", "w"),   # ACL DENIED
+    ("carol", "ops",     "w"),   # ACL ALLOWED (overrides 'ops' not in finance)
+    ("dave",  "guest",   "r"),   # unix other DENIED
+])
+```
+
+---
+
 ## 9. Key Takeaways
 
 - **FCB (File Control Block)** = the OS's per-file metadata record — stores name, type, size, owner, group, timestamps, basic permissions, and pointers to data blocks (implemented as **inode** in Unix, **MFT record** in NTFS)

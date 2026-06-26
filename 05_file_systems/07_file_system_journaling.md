@@ -300,6 +300,403 @@ After a system crash, on the next boot:
 
 ---
 
+## 9. Code Examples
+
+> Working code that demonstrates write-ahead journaling and crash recovery in practice.
+
+### C++ — Simple Version
+Simulate write-ahead journaling: write to journal first, then to disk. Crash during disk write, then recover by replaying the journal.
+
+```cpp
+#include <iostream>
+#include <vector>
+#include <map>
+#include <string>
+using namespace std;
+
+// Journal entry states
+enum class JState { PENDING, COMMITTED, CHECKPOINTED };
+
+struct JournalEntry {
+    int     txId;
+    string  filename;
+    string  newData;
+    JState  state;
+};
+
+// Simulated storage
+vector<JournalEntry>    journal;  // write-ahead log (WAL)
+map<string, string>     disk;     // actual file system data
+int nextTxId = 1;
+
+// Step 1: Log the intended write (safe — sequential append)
+int writeJournal(const string& filename, const string& data) {
+    int txId = nextTxId++;
+    journal.push_back({txId, filename, data, JState::PENDING});
+    cout << "[Journal] TX " << txId << ": queued write to '" << filename << "'\n";
+    return txId;
+}
+
+// Step 2: Mark as committed (durable intent recorded)
+void commitJournal(int txId) {
+    for (auto& e : journal)
+        if (e.txId == txId) { e.state = JState::COMMITTED; break; }
+    cout << "[Journal] TX " << txId << ": COMMITTED\n";
+}
+
+// Step 3: Apply to actual disk (system can crash here)
+void applyToDisk(int txId, bool simulateCrash = false) {
+    for (auto& e : journal) {
+        if (e.txId == txId && e.state == JState::COMMITTED) {
+            if (simulateCrash) {
+                cout << "[CRASH!] System crashed during disk write TX=" << txId << "\n";
+                return;  // disk NOT updated
+            }
+            disk[e.filename] = e.newData;
+            e.state = JState::CHECKPOINTED;
+            cout << "[Disk] TX " << txId << ": '" << e.newData
+                 << "' -> '" << e.filename << "'\n";
+        }
+    }
+}
+
+// Recovery: replay all COMMITTED entries that were not CHECKPOINTED
+void recoverFromJournal() {
+    cout << "[Recovery] Replaying journal...\n";
+    int count = 0;
+    for (auto& e : journal) {
+        if (e.state == JState::COMMITTED) {
+            disk[e.filename] = e.newData;
+            e.state = JState::CHECKPOINTED;
+            cout << "  Replayed TX " << e.txId << ": '" << e.newData
+                 << "' -> '" << e.filename << "'\n";
+            count++;
+        }
+    }
+    cout << "[Recovery] Done. " << count << " transaction(s) replayed.\n";
+}
+
+int main() {
+    // Normal write
+    int tx1 = writeJournal("config.txt", "timeout=30");
+    commitJournal(tx1);
+    applyToDisk(tx1);
+    cout << "config.txt: '" << disk["config.txt"] << "'\n\n";
+
+    // Crash scenario
+    int tx2 = writeJournal("data.bin", "important data");
+    commitJournal(tx2);
+    applyToDisk(tx2, /*simulateCrash=*/true);  // crash!
+    cout << "data.bin before recovery: '" <<
+         (disk.count("data.bin") ? disk["data.bin"] : "<missing>") << "'\n";
+
+    recoverFromJournal();
+    cout << "data.bin after  recovery: '" << disk["data.bin"] << "'\n";
+    return 0;
+}
+```
+
+### C++ — Medium / LeetCode Style
+Full journaling simulation with BEGIN/WRITE/COMMIT/CHECKPOINT/ABORT records, undo logging for aborted transactions, and redo-based crash recovery.
+
+```cpp
+#include <iostream>
+#include <vector>
+#include <map>
+#include <string>
+using namespace std;
+
+enum class RType { BEGIN, WRITE, COMMIT, CHECKPOINT, ABORT };
+
+struct LogRecord {
+    int    txId;
+    RType  type;
+    string target;  // filename (WRITE records)
+    string before;  // pre-image for undo
+    string after;   // post-image for redo
+};
+
+class WALJournal {
+    vector<LogRecord>   log;
+    map<int, string>    txState;  // txId -> state string
+    map<string, string> disk;
+    int nextTx = 1;
+
+    void append(LogRecord r) {
+        log.push_back(r);
+        cout << "  [WAL] " << [](RType t){
+            switch(t){
+                case RType::BEGIN:      return "BEGIN     ";
+                case RType::WRITE:      return "WRITE     ";
+                case RType::COMMIT:     return "COMMIT    ";
+                case RType::CHECKPOINT: return "CHECKPOINT";
+                default:                return "ABORT     ";
+            }}(r.type)
+             << " tx=" << r.txId;
+        if (!r.target.empty()) cout << " file=" << r.target;
+        cout << "\n";
+    }
+
+public:
+    int begin() {
+        int id = nextTx++;
+        txState[id] = "BEGUN";
+        append({id, RType::BEGIN, "", "", ""});
+        return id;
+    }
+
+    void write(int id, const string& file, const string& data) {
+        string before = disk.count(file) ? disk[file] : "";
+        append({id, RType::WRITE, file, before, data});
+    }
+
+    void commit(int id) {
+        append({id, RType::COMMIT, "", "", ""});
+        txState[id] = "COMMITTED";
+        for (auto& r : log)  // apply writes to disk
+            if (r.txId == id && r.type == RType::WRITE)
+                disk[r.target] = r.after;
+        append({id, RType::CHECKPOINT, "", "", ""});
+        txState[id] = "CHECKPOINTED";
+    }
+
+    void abort(int id) {
+        // Undo writes in reverse order using before-images
+        for (auto it = log.rbegin(); it != log.rend(); ++it)
+            if (it->txId == id && it->type == RType::WRITE)
+                disk[it->target] = it->before;
+        append({id, RType::ABORT, "", "", ""});
+        txState[id] = "ABORTED";
+    }
+
+    // After a crash: redo COMMITTED-but-not-CHECKPOINTED transactions
+    void recover() {
+        cout << "\n[RECOVERY] Scanning WAL...\n";
+        map<int,bool> committed, checkpointed;
+        for (auto& r : log) {
+            if (r.type == RType::COMMIT)     committed[r.txId]    = true;
+            if (r.type == RType::CHECKPOINT) checkpointed[r.txId] = true;
+        }
+        for (auto& [id, _] : committed) {
+            if (!checkpointed[id]) {
+                cout << "  REDO tx=" << id << "\n";
+                for (auto& r : log)
+                    if (r.txId == id && r.type == RType::WRITE)
+                        disk[r.target] = r.after;
+            }
+        }
+        cout << "[RECOVERY] Done.\n";
+    }
+
+    void printDisk() {
+        cout << "Disk: ";
+        for (auto& [k,v] : disk) cout << k << "='" << v << "' ";
+        cout << "\n";
+    }
+};
+
+int main() {
+    WALJournal j;
+
+    cout << "=== TX1: normal commit ===\n";
+    int tx1 = j.begin();
+    j.write(tx1, "user.db",    "alice:admin");
+    j.write(tx1, "config.ini", "debug=false");
+    j.commit(tx1);
+    j.printDisk();
+
+    cout << "\n=== TX2: abort (undo) ===\n";
+    int tx2 = j.begin();
+    j.write(tx2, "user.db", "hacked:root");
+    j.abort(tx2);  // rolled back
+    j.printDisk();
+
+    cout << "\n=== TX3: crash after COMMIT, before CHECKPOINT ===\n";
+    int tx3 = j.begin();
+    j.write(tx3, "notes.txt", "crash test");
+    // Manually append COMMIT to log without running commit() fully
+    j.log.push_back({tx3, RType::COMMIT, "", "", ""});
+    cout << "  [CRASH before checkpoint!]\n";
+    j.recover();
+    j.printDisk();
+    return 0;
+}
+```
+
+### Python — Simple Version
+Simulate write-ahead journaling: log, commit, apply, crash, and recover.
+
+```python
+# Simulate Write-Ahead Journaling (WAJ) with crash recovery
+from enum import Enum, auto
+
+class JState(Enum):
+    PENDING      = auto()
+    COMMITTED    = auto()
+    CHECKPOINTED = auto()
+
+# Simulated storage
+journal  = []   # write-ahead log: list of dicts
+disk     = {}   # filename -> content (actual file system)
+next_tx  = 1
+
+def write_journal(filename, data):
+    """Step 1: Append intended write to journal (safe, sequential)."""
+    global next_tx
+    tx_id = next_tx; next_tx += 1
+    journal.append({"tx_id": tx_id, "file": filename,
+                    "data": data, "state": JState.PENDING})
+    print(f"[Journal] TX {tx_id}: queued '{data}' -> '{filename}'")
+    return tx_id
+
+def commit_journal(tx_id):
+    """Step 2: Mark entry as COMMITTED (durable intent)."""
+    for e in journal:
+        if e["tx_id"] == tx_id:
+            e["state"] = JState.COMMITTED
+            print(f"[Journal] TX {tx_id}: COMMITTED")
+            return
+
+def apply_to_disk(tx_id, simulate_crash=False):
+    """Step 3: Write COMMITTED data to disk (can crash here)."""
+    for e in journal:
+        if e["tx_id"] == tx_id and e["state"] == JState.COMMITTED:
+            if simulate_crash:
+                print(f"[CRASH!] Crashed during disk write TX={tx_id}")
+                return  # disk not updated
+            disk[e["file"]] = e["data"]
+            e["state"] = JState.CHECKPOINTED
+            print(f"[Disk] TX {tx_id}: '{e['data']}' -> '{e['file']}'")
+
+def recover():
+    """Replay all COMMITTED (not CHECKPOINTED) entries to fix disk."""
+    print("\n[Recovery] Replaying journal...")
+    count = 0
+    for e in journal:
+        if e["state"] == JState.COMMITTED:
+            disk[e["file"]] = e["data"]
+            e["state"] = JState.CHECKPOINTED
+            print(f"  Recovered TX {e['tx_id']}: '{e['data']}' -> '{e['file']}'")
+            count += 1
+    print(f"[Recovery] Done. {count} transaction(s) replayed.")
+
+# --- Demo ---
+tx1 = write_journal("settings.cfg", "theme=dark")
+commit_journal(tx1)
+apply_to_disk(tx1)
+print(f"Disk: {disk}\n")
+
+tx2 = write_journal("data.json", '{"key": "value"}')
+commit_journal(tx2)
+apply_to_disk(tx2, simulate_crash=True)   # crash!
+print(f"Disk after crash:     {disk}")    # data.json missing
+recover()
+print(f"Disk after recovery:  {disk}")    # data.json back
+```
+
+### Python — Medium Level
+Full WAL journal with BEGIN/WRITE/COMMIT/CHECKPOINT/ABORT records and redo-based crash recovery.
+
+```python
+from enum import Enum, auto
+from dataclasses import dataclass, field
+from typing import List, Dict
+
+class RType(Enum):
+    BEGIN = auto(); WRITE = auto(); COMMIT = auto()
+    CHECKPOINT = auto(); ABORT = auto()
+
+@dataclass
+class LogRecord:
+    tx_id:  int
+    rtype:  RType
+    target: str = ""  # filename (WRITE)
+    before: str = ""  # pre-image for undo
+    after:  str = ""  # post-image for redo
+
+class WALJournal:
+    def __init__(self):
+        self.log:      List[LogRecord]  = []
+        self.tx_state: Dict[int, str]   = {}
+        self.disk:     Dict[str, str]   = {}
+        self._next     = 1
+
+    def _append(self, r: LogRecord):
+        self.log.append(r)
+        print(f"  [WAL] {r.rtype.name:10} tx={r.tx_id}"
+              + (f" file={r.target}" if r.target else ""))
+
+    def begin(self) -> int:
+        tid = self._next; self._next += 1
+        self.tx_state[tid] = "BEGUN"
+        self._append(LogRecord(tid, RType.BEGIN))
+        return tid
+
+    def write(self, tid: int, filename: str, data: str):
+        before = self.disk.get(filename, "")
+        self._append(LogRecord(tid, RType.WRITE, filename, before, data))
+
+    def commit(self, tid: int):
+        self._append(LogRecord(tid, RType.COMMIT))
+        self.tx_state[tid] = "COMMITTED"
+        for r in self.log:        # flush writes to disk
+            if r.tx_id == tid and r.rtype == RType.WRITE:
+                self.disk[r.target] = r.after
+        self._append(LogRecord(tid, RType.CHECKPOINT))
+        self.tx_state[tid] = "CHECKPOINTED"
+
+    def abort(self, tid: int):
+        """Undo writes in reverse order (before-image undo logging)."""
+        for r in reversed(self.log):
+            if r.tx_id == tid and r.rtype == RType.WRITE:
+                self.disk[r.target] = r.before
+        self._append(LogRecord(tid, RType.ABORT))
+        self.tx_state[tid] = "ABORTED"
+
+    def crash_and_recover(self):
+        """Redo all COMMITTED-but-not-CHECKPOINTED transactions."""
+        print("\n[CRASH & RECOVERY] Scanning WAL...")
+        committed    = {r.tx_id for r in self.log if r.rtype == RType.COMMIT}
+        checkpointed = {r.tx_id for r in self.log if r.rtype == RType.CHECKPOINT}
+        to_redo      = committed - checkpointed
+        for tid in to_redo:
+            print(f"  REDO tx={tid}")
+            for r in self.log:
+                if r.tx_id == tid and r.rtype == RType.WRITE:
+                    self.disk[r.target] = r.after
+        print(f"[RECOVERY] Done. {len(to_redo)} transaction(s) redone.")
+
+    def print_disk(self):
+        print("  Disk:", dict(self.disk))
+
+# --- Demo ---
+wal = WALJournal()
+print("=== TX1: normal commit ===")
+tx1 = wal.begin()
+wal.write(tx1, "accounts.db", "alice=1000")
+wal.write(tx1, "log.txt",     "tx1 committed")
+wal.commit(tx1)
+wal.print_disk()
+
+print("\n=== TX2: abort (undo) ===")
+tx2 = wal.begin()
+wal.write(tx2, "accounts.db", "corrupted")
+wal.abort(tx2)
+wal.print_disk()
+
+print("\n=== TX3: crash before checkpoint ===")
+tx3 = wal.begin()
+wal.write(tx3, "notes.txt", "important note")
+# Manually add COMMIT record but skip CHECKPOINT (simulates crash)
+wal.log.append(LogRecord(tx3, RType.COMMIT))
+wal.tx_state[tx3] = "COMMITTED"
+print("  [CRASH before checkpoint!]")
+wal.crash_and_recover()
+wal.print_disk()
+```
+
+---
+
 ## 10. Key Takeaways
 
 - **Journaling** = write a log of planned changes BEFORE applying them; if crash happens, replay the log to reach consistent state

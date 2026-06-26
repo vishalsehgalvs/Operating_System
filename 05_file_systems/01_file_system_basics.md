@@ -231,6 +231,307 @@ flowchart TB
 
 ---
 
+## 7. Code Examples
+
+> Working code that demonstrates file system basics in practice.
+
+### C++ — Simple Version
+Simulate open/read/write/close file operations on an in-memory dictionary.
+
+```cpp
+#include <iostream>
+#include <unordered_map>
+#include <string>
+using namespace std;
+
+// Simple in-memory file system: filename -> content
+unordered_map<string, string> fileSystem;
+// Open file table: file_descriptor -> filename
+unordered_map<int, string>    openFiles;
+int nextFd = 3;  // 0,1,2 reserved for stdin/stdout/stderr
+
+void createFile(const string& name) {
+    if (fileSystem.count(name)) {
+        cout << "File already exists: " << name << "\n";
+        return;
+    }
+    fileSystem[name] = "";
+    cout << "Created file: " << name << "\n";
+}
+
+// Returns a file descriptor (integer handle)
+int openFile(const string& name) {
+    if (!fileSystem.count(name)) {
+        cout << "File not found: " << name << "\n";
+        return -1;
+    }
+    int fd = nextFd++;
+    openFiles[fd] = name;
+    cout << "Opened '" << name << "' with fd=" << fd << "\n";
+    return fd;
+}
+
+void writeFile(int fd, const string& data) {
+    if (!openFiles.count(fd)) { cout << "Bad fd\n"; return; }
+    fileSystem[openFiles[fd]] += data;  // append
+    cout << "Wrote " << data.size() << " bytes to fd=" << fd << "\n";
+}
+
+string readFile(int fd) {
+    if (!openFiles.count(fd)) { cout << "Bad fd\n"; return ""; }
+    return fileSystem[openFiles[fd]];
+}
+
+void closeFile(int fd) {
+    if (!openFiles.count(fd)) { cout << "Bad fd\n"; return; }
+    cout << "Closed fd=" << fd << "\n";
+    openFiles.erase(fd);
+}
+
+int main() {
+    createFile("notes.txt");
+
+    int fd = openFile("notes.txt");
+    writeFile(fd, "Hello, File System!");
+    cout << "Read: " << readFile(fd) << "\n";
+    closeFile(fd);
+
+    return 0;
+}
+```
+
+### C++ — Medium / LeetCode Style
+Inode-based VFS simulation with inode table, directory entries, and a block bitmap.
+
+```cpp
+#include <iostream>
+#include <unordered_map>
+#include <vector>
+#include <string>
+using namespace std;
+
+struct Inode {
+    int         id;
+    string      name;
+    string      type;         // "file" or "dir"
+    int         size;         // bytes
+    vector<int> blocks;       // allocated block numbers
+    string      owner;
+    string      permissions;  // e.g. "rwxr-xr-x"
+};
+
+class SimpleVFS {
+    vector<bool>              blockBitmap;
+    unordered_map<int,Inode>  inodes;
+    unordered_map<string,int> dirEntries;  // name -> inode id
+    int nextInode = 1;
+    int totalBlocks;
+
+    int allocBlock() {
+        for (int i = 0; i < totalBlocks; i++)
+            if (!blockBitmap[i]) { blockBitmap[i] = true; return i; }
+        return -1;  // disk full
+    }
+
+public:
+    SimpleVFS(int blocks = 64) : totalBlocks(blocks), blockBitmap(blocks, false) {}
+
+    bool createFile(const string& name, int sizeBytes, const string& owner = "root") {
+        if (dirEntries.count(name)) { cout << "Exists\n"; return false; }
+        int blocksNeeded = (sizeBytes + 511) / 512;  // 512-byte blocks
+        Inode inode{nextInode++, name, "file", sizeBytes, {}, owner, "rw-r--r--"};
+        for (int i = 0; i < blocksNeeded; i++) {
+            int b = allocBlock();
+            if (b == -1) { cout << "Disk full!\n"; return false; }
+            inode.blocks.push_back(b);
+        }
+        dirEntries[name] = inode.id;
+        inodes[inode.id] = inode;
+        cout << "Created '" << name << "' inode=" << inode.id
+             << " blocks=" << inode.blocks.size() << "\n";
+        return true;
+    }
+
+    void stat(const string& name) {
+        auto it = dirEntries.find(name);
+        if (it == dirEntries.end()) { cout << "Not found\n"; return; }
+        Inode& in = inodes[it->second];
+        cout << "Inode: " << in.id << "  Name: " << in.name
+             << "  Size: " << in.size << "B  Blocks: [";
+        for (int b : in.blocks) cout << b << " ";
+        cout << "]  Owner: " << in.owner
+             << "  Perms: " << in.permissions << "\n";
+    }
+
+    void deleteFile(const string& name) {
+        auto it = dirEntries.find(name);
+        if (it == dirEntries.end()) { cout << "Not found\n"; return; }
+        Inode& in = inodes[it->second];
+        for (int b : in.blocks) blockBitmap[b] = false;  // free blocks
+        inodes.erase(it->second);
+        dirEntries.erase(it);
+        cout << "Deleted '" << name << "'\n";
+    }
+
+    void printBitmap() {
+        cout << "Block bitmap: ";
+        for (bool b : blockBitmap) cout << (b ? '1' : '0');
+        cout << "\n";
+    }
+};
+
+int main() {
+    SimpleVFS vfs(16);
+    vfs.createFile("readme.txt",  1024, "alice");
+    vfs.createFile("kernel.bin",  3000, "root");
+    vfs.stat("readme.txt");
+    vfs.printBitmap();
+    vfs.deleteFile("readme.txt");
+    vfs.printBitmap();
+    return 0;
+}
+```
+
+### Python — Simple Version
+Basic open/read/write/close operations on an in-memory dictionary.
+
+```python
+# In-memory file system: filename -> content string
+file_system = {}
+open_files  = {}   # file_descriptor -> filename
+next_fd     = 3    # 0=stdin, 1=stdout, 2=stderr
+
+def create_file(name):
+    """Create an empty file."""
+    if name in file_system:
+        print(f"File already exists: {name}")
+        return
+    file_system[name] = ""
+    print(f"Created: {name}")
+
+def open_file(name):
+    """Open a file and return a file descriptor integer."""
+    global next_fd
+    if name not in file_system:
+        print(f"File not found: {name}")
+        return -1
+    fd = next_fd; next_fd += 1
+    open_files[fd] = name
+    print(f"Opened '{name}' -> fd={fd}")
+    return fd
+
+def write_file(fd, data):
+    """Append data to an open file."""
+    if fd not in open_files: print("Invalid fd"); return
+    file_system[open_files[fd]] += data
+    print(f"Wrote {len(data)} bytes to fd={fd}")
+
+def read_file(fd):
+    """Read all contents from an open file."""
+    if fd not in open_files: print("Invalid fd"); return ""
+    return file_system[open_files[fd]]
+
+def close_file(fd):
+    """Release the file descriptor."""
+    if fd not in open_files: print("Invalid fd"); return
+    print(f"Closed fd={fd}")
+    del open_files[fd]
+
+# --- Demo ---
+create_file("hello.txt")
+fd = open_file("hello.txt")
+write_file(fd, "Hello, World!\n")
+write_file(fd, "OS Tutorial rocks!")
+print("Content:", read_file(fd))
+close_file(fd)
+```
+
+### Python — Medium Level
+Inode-based VFS simulation with inode table, directory entries, and block allocation tracking.
+
+```python
+from dataclasses import dataclass, field
+from typing import List, Dict, Optional
+
+BLOCK_SIZE = 512  # bytes per block
+
+@dataclass
+class Inode:
+    inode_id:    int
+    name:        str
+    file_type:   str           # "file" or "dir"
+    size:        int           # bytes
+    blocks:      List[int] = field(default_factory=list)
+    owner:       str = "root"
+    permissions: str = "rw-r--r--"
+
+class VirtualFileSystem:
+    def __init__(self, total_blocks: int = 64):
+        self.total_blocks = total_blocks
+        self.bitmap:      List[bool]       = [False] * total_blocks  # False = free
+        self.inodes:      Dict[int, Inode] = {}
+        self.dir_entries: Dict[str, int]   = {}  # name -> inode_id
+        self._next_inode  = 1
+
+    def _alloc_blocks(self, count: int) -> Optional[List[int]]:
+        allocated = []
+        for i, used in enumerate(self.bitmap):
+            if not used:
+                allocated.append(i)
+                if len(allocated) == count: break
+        if len(allocated) < count: return None
+        for b in allocated: self.bitmap[b] = True
+        return allocated
+
+    def create(self, name: str, size_bytes: int, owner: str = "root") -> bool:
+        if name in self.dir_entries:
+            print(f"Already exists: {name}"); return False
+        blocks_needed = (size_bytes + BLOCK_SIZE - 1) // BLOCK_SIZE
+        blocks = self._alloc_blocks(blocks_needed)
+        if blocks is None: print("Disk full!"); return False
+        inode = Inode(self._next_inode, name, "file", size_bytes, blocks, owner)
+        self.inodes[inode.inode_id] = inode
+        self.dir_entries[name]      = inode.inode_id
+        self._next_inode += 1
+        print(f"Created '{name}' | inode={inode.inode_id} | "
+              f"blocks={blocks} | owner={owner}")
+        return True
+
+    def stat(self, name: str):
+        inode_id = self.dir_entries.get(name)
+        if inode_id is None: print(f"Not found: {name}"); return
+        inode = self.inodes[inode_id]
+        print(f"  Name: {inode.name}, Inode: {inode.inode_id}, "
+              f"Size: {inode.size}B, Blocks: {inode.blocks}, "
+              f"Owner: {inode.owner}, Perms: {inode.permissions}")
+
+    def delete(self, name: str):
+        inode_id = self.dir_entries.pop(name, None)
+        if inode_id is None: print(f"Not found: {name}"); return
+        inode = self.inodes.pop(inode_id)
+        for b in inode.blocks: self.bitmap[b] = False
+        print(f"Deleted '{name}', freed blocks: {inode.blocks}")
+
+    def list_dir(self):
+        print("Directory listing:")
+        for name, iid in self.dir_entries.items():
+            inode = self.inodes[iid]
+            print(f"  {inode.permissions}  {inode.owner:8}  {inode.size:6}B  {name}")
+
+# --- Demo ---
+vfs = VirtualFileSystem(total_blocks=20)
+vfs.create("readme.txt",  1024, "alice")
+vfs.create("kernel.bin",  2560, "root")
+vfs.create("config.cfg",   512, "alice")
+vfs.list_dir()
+print()
+vfs.stat("kernel.bin")
+vfs.delete("readme.txt")
+print(f"\nBitmap after delete: {''.join('1' if b else '0' for b in vfs.bitmap)}")
+```
+
+---
+
 ## 8. Key Takeaways
 
 - A **file system** provides the structure (naming, hierarchy, metadata, access control) that turns raw storage into usable space

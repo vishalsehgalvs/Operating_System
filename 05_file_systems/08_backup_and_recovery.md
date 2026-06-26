@@ -316,6 +316,344 @@ Some file systems or services track file history automatically:
 
 ---
 
+## 7. Code Examples
+
+> Working code that demonstrates backup strategies and snapshot versioning in practice.
+
+### C++ — Simple Version
+Simulate full, incremental, and differential backup strategies on an in-memory file system.
+
+```cpp
+#include <iostream>
+#include <unordered_map>
+#include <vector>
+#include <string>
+using namespace std;
+
+// Simulated file system: filename -> version number (incremented on each change)
+unordered_map<string, int> fileSystem = {
+    {"report.docx", 1}, {"data.csv", 1}, {"config.ini", 1}, {"readme.txt", 1}
+};
+
+// Full backup: copy ALL files regardless of modification state
+unordered_map<string,int> fullBackup() {
+    cout << "[Full Backup] All files:\n";
+    for (auto& [f,v] : fileSystem) cout << "  " << f << " (v" << v << ")\n";
+    return fileSystem;
+}
+
+// Incremental backup: only files changed SINCE last backup (any type)
+unordered_map<string,int> incrementalBackup(
+        const unordered_map<string,int>& lastBackup) {
+    cout << "[Incremental] Changed since last backup:\n";
+    unordered_map<string,int> backup;
+    for (auto& [f,v] : fileSystem) {
+        auto it = lastBackup.find(f);
+        if (it == lastBackup.end() || it->second != v) {
+            cout << "  " << f << " (v" << v << ")\n";
+            backup[f] = v;
+        }
+    }
+    if (backup.empty()) cout << "  (nothing changed)\n";
+    return backup;
+}
+
+// Differential backup: files changed SINCE the last FULL backup
+unordered_map<string,int> differentialBackup(
+        const unordered_map<string,int>& lastFull) {
+    cout << "[Differential] Changed since last FULL backup:\n";
+    unordered_map<string,int> backup;
+    for (auto& [f,v] : fileSystem) {
+        auto it = lastFull.find(f);
+        if (it == lastFull.end() || it->second != v) {
+            cout << "  " << f << " (v" << v << ")\n";
+            backup[f] = v;
+        }
+    }
+    if (backup.empty()) cout << "  (nothing changed)\n";
+    return backup;
+}
+
+void modify(const vector<string>& files) {
+    for (auto& f : files) {
+        fileSystem[f]++;
+        cout << "Modified: " << f << " -> v" << fileSystem[f] << "\n";
+    }
+}
+
+int main() {
+    cout << "=== Day 0: Full Backup ===\n";
+    auto full = fullBackup();
+
+    cout << "\n--- Day 1: Modify 2 files ---\n";
+    modify({"report.docx", "config.ini"});
+
+    cout << "\n=== Day 1: Incremental (since full) ===\n";
+    auto inc1 = incrementalBackup(full);
+
+    cout << "\n--- Day 2: Modify 1 more ---\n";
+    modify({"data.csv"});
+
+    cout << "\n=== Day 2: Incremental (since day 1) ===\n";
+    incrementalBackup(inc1);
+
+    cout << "\n=== Day 2: Differential (always vs. day 0 full) ===\n";
+    differentialBackup(full);  // grows each day vs. fixed full baseline
+
+    cout << "\nRestore comparison:\n";
+    cout << "  Full:         restore from 1 archive\n";
+    cout << "  Incremental:  restore full + day1-inc + day2-inc (chain)\n";
+    cout << "  Differential: restore full + day2-diff (just 2 archives)\n";
+    return 0;
+}
+```
+
+### C++ — Medium / LeetCode Style
+Snapshot-based versioning system — take, diff, and restore snapshots.
+
+```cpp
+#include <iostream>
+#include <unordered_map>
+#include <vector>
+#include <string>
+using namespace std;
+
+struct Snapshot {
+    string label;
+    unordered_map<string, string> files;  // filename -> content
+};
+
+class VersionedFS {
+    unordered_map<string, string> live;   // current file system
+    vector<Snapshot>              snaps;  // all snapshots
+public:
+    void write(const string& name, const string& content) {
+        live[name] = content;
+        cout << "Write: " << name << " = '" << content << "'\n";
+    }
+    void remove(const string& name) {
+        live.erase(name);
+        cout << "Delete: " << name << "\n";
+    }
+
+    void snapshot(const string& label) {
+        snaps.push_back({label, live});
+        cout << "[Snapshot] '" << label << "' " << live.size() << " files\n";
+    }
+
+    bool restore(const string& label) {
+        for (auto& s : snaps) {
+            if (s.label == label) {
+                live = s.files;
+                cout << "[Restore] Rolled back to '" << label << "'\n";
+                printFS();
+                return true;
+            }
+        }
+        cout << "Snapshot '" << label << "' not found\n";
+        return false;
+    }
+
+    void diff(const string& l1, const string& l2) {
+        const Snapshot *s1 = nullptr, *s2 = nullptr;
+        for (auto& s : snaps) {
+            if (s.label == l1) s1 = &s;
+            if (s.label == l2) s2 = &s;
+        }
+        if (!s1 || !s2) { cout << "Snapshot not found\n"; return; }
+        cout << "Diff '" << l1 << "' -> '" << l2 << "':\n";
+        for (auto& [f,v] : s2->files) {
+            if (!s1->files.count(f))                 cout << "  + (added)    " << f << "\n";
+            else if (s1->files.at(f) != v)           cout << "  ~ (changed)  " << f << "\n";
+        }
+        for (auto& [f,_] : s1->files)
+            if (!s2->files.count(f))                 cout << "  - (deleted)  " << f << "\n";
+    }
+
+    void printFS() {
+        cout << "  Live: ";
+        for (auto& [n,c] : live) cout << n << "='" << c << "' ";
+        cout << "\n";
+    }
+};
+
+int main() {
+    VersionedFS vfs;
+    vfs.write("notes.txt",  "initial notes");
+    vfs.write("readme.txt", "readme v1");
+    vfs.snapshot("v1.0");
+
+    vfs.write("notes.txt",  "updated notes");
+    vfs.write("data.csv",   "a,b,c");
+    vfs.remove("readme.txt");
+    vfs.snapshot("v2.0");
+
+    vfs.diff("v1.0", "v2.0");
+    cout << "\nRestoring to v1.0:\n";
+    vfs.restore("v1.0");
+    return 0;
+}
+```
+
+### Python — Simple Version
+Simulate full, incremental, and differential backup strategies on an in-memory file dictionary.
+
+```python
+# Simulate Full, Incremental, and Differential backup strategies
+
+# Simulated file system: filename -> version number
+file_system = {
+    "report.docx": 1,
+    "data.csv":    1,
+    "config.ini":  1,
+    "readme.txt":  1,
+}
+
+def full_backup():
+    """Copy ALL files — largest backup, fastest restore."""
+    backup = dict(file_system)
+    print("[Full Backup] Copied:", list(backup.keys()))
+    return backup
+
+def incremental_backup(last_backup: dict):
+    """Only files changed SINCE the last backup (any type)."""
+    changed = {f: v for f, v in file_system.items()
+               if last_backup.get(f) != v or f not in last_backup}
+    print(f"[Incremental] Changed since last backup: {list(changed.keys()) or ['(none)']  }")
+    return changed
+
+def differential_backup(last_full: dict):
+    """Only files changed SINCE the last FULL backup (grows each day)."""
+    changed = {f: v for f, v in file_system.items()
+               if last_full.get(f) != v or f not in last_full}
+    print(f"[Differential] Changed since last full: {list(changed.keys()) or ['(none)']}")
+    return changed
+
+def modify(*filenames):
+    for f in filenames:
+        if f in file_system:
+            file_system[f] += 1
+            print(f"  Modified: {f} -> v{file_system[f]}")
+
+# --- Demo ---
+print("=== Day 0: Full Backup ===")
+full = full_backup()
+
+print("\n--- Day 1 ---")
+modify("report.docx", "config.ini")
+print("\n=== Day 1: Incremental (since full) ===")
+inc1 = incremental_backup(full)
+
+print("\n--- Day 2 ---")
+modify("data.csv")
+print("\n=== Day 2: Incremental (since day 1) ===")
+inc2 = incremental_backup(inc1)
+print("\n=== Day 2: Differential (always vs. day 0 full) ===")
+diff2 = differential_backup(full)
+
+print("\n--- Restore comparison ---")
+print(f"  Full backup size:       {len(full)} files")
+print(f"  Inc day1 size:          {len(inc1)} files (small, fast backup)")
+print(f"  Inc day2 size:          {len(inc2)} files (small, fast backup)")
+print(f"  Diff day2 size:         {len(diff2)} files (grows vs. full)")
+print("  Restore from inc: full + inc1 + inc2  (chain — slow restore)")
+print("  Restore from diff: full + diff2        (only 2 archives)")
+```
+
+### Python — Medium Level
+Snapshot versioning system — take/diff/restore snapshots with change tracking.
+
+```python
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Dict, List, Optional
+
+@dataclass
+class Snapshot:
+    label:   str
+    created: str
+    files:   Dict[str, str] = field(default_factory=dict)  # filename -> content
+
+class VersionedFileSystem:
+    def __init__(self):
+        self._live:  Dict[str, str]   = {}   # current state
+        self._snaps: List[Snapshot]   = []   # history
+
+    def write(self, name: str, content: str):
+        self._live[name] = content
+
+    def delete(self, name: str):
+        self._live.pop(name, None)
+
+    def snapshot(self, label: str) -> Snapshot:
+        """Capture the current state as an immutable snapshot."""
+        snap = Snapshot(
+            label   = label,
+            created = datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            files   = dict(self._live)
+        )
+        self._snaps.append(snap)
+        print(f"[Snapshot] '{label}' — {len(snap.files)} files @ {snap.created}")
+        return snap
+
+    def restore(self, label: str) -> bool:
+        """Roll back live FS to a previous snapshot."""
+        snap = self._find(label)
+        if not snap:
+            print(f"Snapshot '{label}' not found."); return False
+        self._live = dict(snap.files)
+        print(f"[Restore] Rolled back to '{label}' — {len(self._live)} files.")
+        return True
+
+    def diff(self, label1: str, label2: str):
+        """Show what changed between two snapshots."""
+        s1, s2 = self._find(label1), self._find(label2)
+        if not s1 or not s2: print("Snapshot not found."); return
+        all_files = set(s1.files) | set(s2.files)
+        print(f"Diff '{label1}' -> '{label2}':")
+        changes = 0
+        for f in sorted(all_files):
+            if   f not in s1.files:            print(f"  + (added)    {f}"); changes += 1
+            elif f not in s2.files:            print(f"  - (deleted)  {f}"); changes += 1
+            elif s1.files[f] != s2.files[f]:  print(f"  ~ (modified) {f}"); changes += 1
+        if not changes: print("  (no changes)")
+
+    def list_snapshots(self):
+        print("Snapshots:")
+        for s in self._snaps:
+            print(f"  [{s.label}]  {s.created}  {len(s.files)} files")
+
+    def show(self):
+        print("Live FS:", {k: v[:20] + ("..." if len(v) > 20 else "")
+                            for k, v in self._live.items()})
+
+    def _find(self, label: str) -> Optional[Snapshot]:
+        return next((s for s in self._snaps if s.label == label), None)
+
+# --- Demo ---
+vfs = VersionedFileSystem()
+vfs.write("users.json",  '{"users": ["alice"]}')
+vfs.write("config.yaml", "debug: false\nport: 8080")
+vfs.write("notes.md",    "# Meeting notes v1")
+vfs.snapshot("release-1.0")
+
+vfs.write("users.json",  '{"users": ["alice", "bob"]}')
+vfs.write("feature.py",  "def new_feature(): pass")
+vfs.delete("notes.md")
+vfs.snapshot("release-2.0")
+
+print()
+vfs.diff("release-1.0", "release-2.0")
+print()
+vfs.list_snapshots()
+print()
+vfs.show()
+vfs.restore("release-1.0")
+vfs.show()
+```
+
+---
+
 ## 8. Key Takeaways
 
 - **Backup** = duplicate copies of data; **Recovery** = restoring from those copies after loss

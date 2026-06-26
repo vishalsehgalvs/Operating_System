@@ -244,6 +244,341 @@ For large files, index blocks point to other index blocks:
 
 ---
 
+## 7. Code Examples
+
+> Working code that demonstrates all three file allocation methods in practice.
+
+### C++ — Simple Version
+Implement contiguous (array), linked (linked list of blocks), and indexed (index block) allocation side by side.
+
+```cpp
+#include <iostream>
+#include <vector>
+#include <string>
+using namespace std;
+
+const int TOTAL_BLOCKS = 20;
+
+// ============================================================
+// 1. Contiguous Allocation
+//    File occupies consecutive blocks starting at 'start'
+// ============================================================
+struct ContiguousFile { string name; int start, length; };
+
+bool allocContiguous(vector<bool>& disk, int length, ContiguousFile& f) {
+    // Find the first run of 'length' consecutive free blocks
+    for (int i = 0; i + length <= TOTAL_BLOCKS; i++) {
+        bool ok = true;
+        for (int j = i; j < i + length; j++) if (disk[j]) { ok = false; break; }
+        if (ok) {
+            for (int j = i; j < i + length; j++) disk[j] = true;
+            f.start = i; f.length = length;
+            return true;
+        }
+    }
+    return false;
+}
+
+// ============================================================
+// 2. Linked Allocation
+//    Each block stores data + a pointer to the next block
+// ============================================================
+struct Block { int id; int next; string data; };  // next == -1 means end
+
+vector<Block> blockStore;  // all blocks on disk
+int linkedHead = -1;       // head block of the last allocated file
+
+void allocLinked(const vector<string>& chunks) {
+    int prev = -1;
+    for (const string& chunk : chunks) {
+        int id = (int)blockStore.size();
+        blockStore.push_back({id, -1, chunk});
+        if (prev != -1) blockStore[prev].next = id;  // link
+        else linkedHead = id;                        // head
+        prev = id;
+    }
+}
+
+void readLinked(int head) {
+    cout << "Linked chain: ";
+    for (int cur = head; cur != -1; cur = blockStore[cur].next)
+        cout << "[" << cur << ":'" << blockStore[cur].data << "']->";
+    cout << "NULL\n";
+}
+
+// ============================================================
+// 3. Indexed Allocation
+//    An index block holds pointers (block numbers) to data blocks
+// ============================================================
+struct IndexedFile { string name; vector<int> indexBlock; };
+
+bool allocIndexed(vector<bool>& disk, int n, IndexedFile& f) {
+    for (int i = 0; i < TOTAL_BLOCKS && (int)f.indexBlock.size() < n; i++)
+        if (!disk[i]) { disk[i] = true; f.indexBlock.push_back(i); }
+    return (int)f.indexBlock.size() == n;
+}
+
+int main() {
+    // --- Contiguous ---
+    vector<bool> disk1(TOTAL_BLOCKS, false);
+    ContiguousFile cf{"report.txt", 0, 0};
+    allocContiguous(disk1, 5, cf);
+    cout << "Contiguous: start=" << cf.start << " length=" << cf.length
+         << "  | random-access to block 3: block " << cf.start + 3 << "\n";
+
+    // --- Linked ---
+    allocLinked({"Hello", " World", " from", " FS"});
+    readLinked(linkedHead);
+
+    // --- Indexed ---
+    vector<bool> disk3(TOTAL_BLOCKS, false);
+    IndexedFile idf{"data.bin", {}};
+    allocIndexed(disk3, 4, idf);
+    cout << "Indexed blocks: ";
+    for (int b : idf.indexBlock) cout << b << " ";
+    cout << "  | random-access pos 2: block " << idf.indexBlock[2] << "\n";
+
+    return 0;
+}
+```
+
+### C++ — Medium / LeetCode Style
+All three methods with access-time analysis and comparison printed at the end.
+
+```cpp
+#include <iostream>
+#include <vector>
+#include <string>
+using namespace std;
+
+const int BLOCKS = 24;
+
+// ---- 1. Contiguous ----
+class ContiguousFS {
+    vector<bool> disk;
+public:
+    ContiguousFS() : disk(BLOCKS, false) {}
+    // Returns start index (-1 if no space). Random access = O(1)
+    int allocate(int len) {
+        for (int i = 0; i + len <= BLOCKS; i++) {
+            bool ok = true;
+            for (int j = i; j < i+len; j++) if (disk[j]) { ok=false; break; }
+            if (ok) { for (int j=i;j<i+len;j++) disk[j]=true; return i; }
+        }
+        return -1;
+    }
+    int read(int start, int offset) { return start + offset; }  // O(1)
+};
+
+// ---- 2. Linked ----
+struct LBlock { string data; int next = -1; };
+class LinkedFS {
+    vector<LBlock> disk;
+    int used = 0;
+public:
+    LinkedFS() : disk(BLOCKS) {}
+    int allocate(const vector<string>& chunks) {
+        int head = used, prev = -1;
+        for (const auto& c : chunks) {
+            disk[used] = {c, -1};
+            if (prev != -1) disk[prev].next = used;
+            else head = used;
+            prev = used++;
+        }
+        return head;
+    }
+    // Sequential access only: O(n) to reach offset
+    string read(int head, int pos) {
+        int cur = head;
+        for (int i = 0; i < pos && cur != -1; i++) cur = disk[cur].next;
+        return (cur != -1) ? disk[cur].data : "";
+    }
+};
+
+// ---- 3. Indexed ----
+class IndexedFS {
+    vector<bool>   disk;
+    vector<string> data;
+public:
+    IndexedFS() : disk(BLOCKS, false), data(BLOCKS) {}
+    vector<int> allocate(const vector<string>& chunks) {
+        vector<int> idx;
+        int used = 0;
+        for (const auto& c : chunks) {
+            while (used < BLOCKS && disk[used]) used++;
+            disk[used] = true; data[used] = c;
+            idx.push_back(used++);
+        }
+        return idx;  // this vector IS the index block
+    }
+    string read(const vector<int>& idx, int pos) {  // O(1)
+        return (pos < (int)idx.size()) ? data[idx[pos]] : "";
+    }
+};
+
+int main() {
+    vector<string> file = {"chunk0", "chunk1", "chunk2", "chunk3"};
+
+    ContiguousFS cfs;
+    int start = cfs.allocate(4);
+    cout << "[Contiguous] start=" << start
+         << " | read(pos=2) -> block " << cfs.read(start,2)
+         << " | access: O(1)\n";
+
+    LinkedFS lfs;
+    int head = lfs.allocate(file);
+    cout << "[Linked]     read(pos=2) = '" << lfs.read(head, 2)
+         << "' | access: O(n)\n";
+
+    IndexedFS ifs;
+    auto idx = ifs.allocate(file);
+    cout << "[Indexed]    read(pos=2) = '" << ifs.read(idx, 2)
+         << "' | access: O(1) via index block\n";
+
+    return 0;
+}
+```
+
+### Python — Simple Version
+All three allocation methods in plain Python with demos.
+
+```python
+# Simulate three file allocation methods
+
+TOTAL_BLOCKS = 16
+
+# ===========================
+# 1. Contiguous Allocation
+# ===========================
+def alloc_contiguous(disk, length):
+    """Find the first run of 'length' free blocks. Returns start index or -1."""
+    for start in range(len(disk) - length + 1):
+        if all(not disk[start + i] for i in range(length)):
+            for i in range(length): disk[start + i] = True
+            return start
+    return -1
+
+# ===========================
+# 2. Linked Allocation
+# ===========================
+def alloc_linked(chunks):
+    """
+    Return a list of (data, next_index) tuples.
+    The head is index 0; the last element has next_index=None.
+    """
+    n = len(chunks)
+    return [(chunks[i], i + 1 if i + 1 < n else None) for i in range(n)]
+
+def read_linked(blocks, head=0):
+    """Follow the chain and return all data in order."""
+    result, cur = [], head
+    while cur is not None:
+        data, nxt = blocks[cur]
+        result.append(data)
+        cur = nxt
+    return result
+
+# ===========================
+# 3. Indexed Allocation
+# ===========================
+def alloc_indexed(disk, n):
+    """Allocate n blocks; return the index block (list of block numbers)."""
+    index_block = []
+    for i in range(len(disk)):
+        if not disk[i]:
+            disk[i] = True
+            index_block.append(i)
+            if len(index_block) == n: break
+    return index_block
+
+def read_indexed(index_block, block_data, pos):
+    """O(1) random access via the index block."""
+    return block_data[index_block[pos]]
+
+# --- Demo ---
+disk1 = [False] * TOTAL_BLOCKS
+start = alloc_contiguous(disk1, 4)
+print(f"Contiguous: start={start}, blocks={list(range(start, start+4))}")
+print(f"  Random access pos 2 -> block {start + 2}")
+
+linked = alloc_linked(["Hello", " World", " from", " FS!"])
+print(f"Linked chain: {read_linked(linked)}")
+
+disk3 = [False] * TOTAL_BLOCKS
+block_content = [f"data-{i}" for i in range(TOTAL_BLOCKS)]
+idx = alloc_indexed(disk3, 4)
+print(f"Indexed: index_block={idx}")
+print(f"  Random access pos 2 -> '{read_indexed(idx, block_content, 2)}'")
+```
+
+### Python — Medium Level
+All three methods with access complexity comparison printed as a report.
+
+```python
+# Compare contiguous, linked, and indexed allocation — performance and trade-offs
+
+TOTAL = 20
+
+class AllocationSimulator:
+    def __init__(self, total=TOTAL):
+        self.total = total
+
+    # ---------- Contiguous ----------
+    def contiguous(self, bitmap, length):
+        for start in range(self.total - length + 1):
+            if all(not bitmap[start+i] for i in range(length)):
+                for i in range(length): bitmap[start+i] = True
+                return {"method":  "Contiguous",
+                        "start":   start, "length": length,
+                        "access":  "O(1): block = start + offset",
+                        "weakness":"External fragmentation"}
+        return None
+
+    # ---------- Linked ----------
+    def linked(self, bitmap, length):
+        blocks, prev = [], None
+        for _ in range(length):
+            b = next((i for i in range(self.total) if not bitmap[i]), None)
+            if b is None: return None
+            bitmap[b] = True; blocks.append(b)
+        chain = {blocks[i]: blocks[i+1] for i in range(len(blocks)-1)}
+        chain[blocks[-1]] = -1
+        return {"method":   "Linked",
+                "head":     blocks[0], "chain": chain,
+                "access":   "O(n): must traverse chain to reach offset",
+                "weakness": "No random access; pointer overhead"}
+
+    # ---------- Indexed ----------
+    def indexed(self, bitmap, length):
+        data_blocks = []
+        for _ in range(length + 1):  # +1 for the index block itself
+            b = next((i for i in range(self.total) if not bitmap[i]), None)
+            if b is None: return None
+            bitmap[b] = True; data_blocks.append(b)
+        return {"method":      "Indexed",
+                "index_block": data_blocks[0],
+                "data_blocks": data_blocks[1:],
+                "access":      "O(1): data_block = index_block[offset]",
+                "weakness":    "Index block overhead; multi-level for large files"}
+
+# --- Demo ---
+sim = AllocationSimulator()
+for method_fn, label in [
+    (lambda b: sim.contiguous(b, 4), "Contiguous"),
+    (lambda b: sim.linked(b, 4),     "Linked"),
+    (lambda b: sim.indexed(b, 4),    "Indexed"),
+]:
+    bitmap = [False] * TOTAL
+    # Pre-fragment: mark some blocks used
+    for i in [0, 2, 4]: bitmap[i] = True
+    result = method_fn(bitmap)
+    print(f"=== {label} ===")
+    for k, v in result.items(): print(f"  {k}: {v}")
+    print()
+```
+
+---
+
 ## 8. Key Takeaways
 
 - **Contiguous allocation** = file occupies consecutive blocks; excellent sequential/random access but suffers from external fragmentation and can't grow easily — used for CD/DVD

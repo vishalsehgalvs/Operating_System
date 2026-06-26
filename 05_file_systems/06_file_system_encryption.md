@@ -338,6 +338,252 @@ cryptsetup close my_volume                 # Re-encrypt / close when done
 
 ---
 
+## 10. Code Examples
+
+> Working code that demonstrates file encryption concepts in practice.
+
+### C++ — Simple Version
+XOR cipher on file data — same operation encrypts and decrypts (symmetric).
+
+```cpp
+#include <iostream>
+#include <string>
+using namespace std;
+
+// XOR cipher: encrypt(plaintext, key) = ciphertext
+//             encrypt(ciphertext, key) = plaintext  (same operation!)
+// Toy example only — do NOT use in production
+
+string xorCipher(const string& data, uint8_t key) {
+    string result = data;
+    for (char& c : result)
+        c ^= key;  // XOR every byte with the single-byte key
+    return result;
+}
+
+// Multi-byte key: key bytes wrap around (repeating-key XOR)
+string xorMultiKey(const string& data, const string& key) {
+    string result = data;
+    for (int i = 0; i < (int)data.size(); i++)
+        result[i] = data[i] ^ (uint8_t)key[i % key.size()];
+    return result;
+}
+
+void demo(const string& plaintext, uint8_t singleKey, const string& multiKey) {
+    cout << "=== Single-byte XOR (key=" << (int)singleKey << ") ===\n";
+    string cipher    = xorCipher(plaintext, singleKey);
+    string decrypted = xorCipher(cipher,    singleKey);  // same op
+    cout << "Plaintext:  \"" << plaintext  << "\"\n";
+    cout << "Ciphertext: [raw bytes, length=" << cipher.size() << "]\n";
+    cout << "Decrypted:  \"" << decrypted  << "\"\n";
+    cout << "Match: "        << (plaintext == decrypted ? "YES" : "NO") << "\n\n";
+
+    cout << "=== Multi-byte XOR (key=\"" << multiKey << "\") ===\n";
+    string c2 = xorMultiKey(plaintext, multiKey);
+    string d2 = xorMultiKey(c2,        multiKey);
+    cout << "Decrypted: \"" << d2 << "\"  Match: " << (plaintext == d2 ? "YES" : "NO") << "\n";
+}
+
+int main() {
+    demo("Hello, File System!", 0x42, "SECRET");
+    return 0;
+}
+```
+
+### C++ — Medium / LeetCode Style
+Simplified block cipher: demonstrate key scheduling, SubBytes, and AddRoundKey concepts (AES-inspired, NOT real crypto).
+
+```cpp
+#include <iostream>
+#include <vector>
+#include <array>
+#include <string>
+using namespace std;
+
+// Block cipher simulation (educational only — NOT real AES)
+// Concepts shown: 16-byte blocks, SubBytes, AddRoundKey, multiple rounds
+
+const int BLOCK = 16;
+
+// Toy S-box: swap high/low nibbles of each byte
+uint8_t sbox(uint8_t b)     { return ((b & 0x0F) << 4) | ((b & 0xF0) >> 4); }
+uint8_t sbox_inv(uint8_t b) { return sbox(b); }  // self-inverse
+
+void xorBlock(vector<uint8_t>& blk, const array<uint8_t,BLOCK>& key) {
+    for (int i = 0; i < BLOCK; i++) blk[i] ^= key[i];
+}
+
+vector<uint8_t> encryptBlock(vector<uint8_t> blk,
+                              const array<uint8_t,BLOCK>& key, int rounds=3) {
+    for (int r = 0; r < rounds; r++) {
+        for (auto& b : blk) b = sbox(b);  // SubBytes
+        xorBlock(blk, key);               // AddRoundKey
+    }
+    return blk;
+}
+
+vector<uint8_t> decryptBlock(vector<uint8_t> blk,
+                              const array<uint8_t,BLOCK>& key, int rounds=3) {
+    for (int r = 0; r < rounds; r++) {
+        xorBlock(blk, key);                    // undo AddRoundKey
+        for (auto& b : blk) b = sbox_inv(b);  // undo SubBytes
+    }
+    return blk;
+}
+
+// Encrypt a string in 16-byte zero-padded blocks
+vector<vector<uint8_t>> encryptFile(const string& data,
+                                    const array<uint8_t,BLOCK>& key) {
+    vector<vector<uint8_t>> cipher;
+    for (int i = 0; i < (int)data.size(); i += BLOCK) {
+        vector<uint8_t> blk(BLOCK, 0);  // zero-pad last block
+        for (int j = 0; j < BLOCK && i+j < (int)data.size(); j++)
+            blk[j] = (uint8_t)data[i+j];
+        cipher.push_back(encryptBlock(blk, key));
+    }
+    return cipher;
+}
+
+string decryptFile(const vector<vector<uint8_t>>& cipher,
+                   const array<uint8_t,BLOCK>& key) {
+    string result;
+    for (auto& blk : cipher)
+        for (auto b : decryptBlock(blk, key))
+            if (b != 0) result += (char)b;  // strip padding zeros
+    return result;
+}
+
+int main() {
+    array<uint8_t,BLOCK> key = {0x2B,0x7E,0x15,0x16,0x28,0xAE,0xD2,0xA6,
+                                 0xAB,0xF7,0x15,0x88,0x09,0xCF,0x4F,0x3C};
+    string plaintext = "Top Secret Data!";
+    auto cipher    = encryptFile(plaintext, key);
+    auto recovered = decryptFile(cipher,    key);
+    cout << "Plaintext:  \"" << plaintext  << "\"\n";
+    cout << "Blocks:      " << cipher.size() << " x 16 bytes\n";
+    cout << "Decrypted:  \"" << recovered  << "\"\n";
+    cout << "Match: " << (plaintext == recovered ? "YES" : "NO") << "\n";
+    return 0;
+}
+```
+
+### Python — Simple Version
+XOR cipher encrypt/decrypt cycle — demonstrates that encryption and decryption are the same operation.
+
+```python
+# Simulate file encryption with XOR cipher (toy example — NOT for production)
+
+def xor_cipher(data: bytes, key: bytes) -> bytes:
+    """XOR each byte of data with corresponding key byte (key repeats)."""
+    return bytes(b ^ key[i % len(key)] for i, b in enumerate(data))
+
+def simulate_file_encryption(plaintext: str, key: str):
+    plain_bytes = plaintext.encode()
+    key_bytes   = key.encode()
+    print(f"Plaintext:  '{plaintext}'")
+    print(f"Key:        '{key}'")
+
+    # Encrypt (simulate writing to disk as ciphertext)
+    cipher = xor_cipher(plain_bytes, key_bytes)
+    print(f"Ciphertext: {list(cipher[:8])}...")
+
+    # Decrypt (simulate reading back and decrypting)
+    decrypted = xor_cipher(cipher, key_bytes)  # same XOR operation
+    print(f"Decrypted:  '{decrypted.decode()}'")
+    print(f"Match: {'YES' if decrypted == plain_bytes else 'NO'}")
+
+# --- Demo 1: basic ---
+simulate_file_encryption("Hello, Secret File!", "KEY42")
+
+# --- Demo 2: different keys -> different ciphertext ---
+print("\nSame message, different keys:")
+msg = b"password123"
+for k in [b"A", b"Z", b"MULTIKEY"]:
+    enc = xor_cipher(msg, k)
+    dec = xor_cipher(enc, k)
+    print(f"  key={k!r:12} cipher={enc.hex()[:14]}... match={dec == msg}")
+```
+
+### Python — Medium Level
+Block cipher simulation with PKCS#7 padding, toy key schedule, SubBytes, and AddRoundKey — AES concepts made visible.
+
+```python
+# Block cipher demonstration (AES-INSPIRED concept, NOT real crypto)
+# Shows: PKCS#7 padding, key scheduling, SubBytes, AddRoundKey, multi-round encryption
+
+BLOCK_SIZE = 16
+
+def pad(data: bytes) -> bytes:
+    """PKCS#7: pad to multiple of BLOCK_SIZE."""
+    n = BLOCK_SIZE - (len(data) % BLOCK_SIZE)
+    return data + bytes([n] * n)
+
+def unpad(data: bytes) -> bytes:
+    return data[:-data[-1]]
+
+def toy_sbox(b: int) -> int:
+    """Swap high/low nibbles (toy substitution, not real AES S-box)."""
+    return ((b & 0x0F) << 4) | ((b & 0xF0) >> 4)
+
+def xor_bytes(a: bytes, b: bytes) -> bytes:
+    return bytes(x ^ y for x, y in zip(a, b))
+
+def generate_round_keys(key: bytes, rounds: int) -> list:
+    """
+    Toy key schedule: derive each round key by rotating and XOR-ing
+    with a round constant. Real AES uses a much more complex schedule.
+    """
+    keys = [key]
+    for r in range(1, rounds):
+        prev    = keys[-1]
+        rotated = prev[1:] + prev[:1]              # rotate left 1 byte
+        rcon    = bytes([r] + [0] * (BLOCK_SIZE - 1))  # round constant
+        keys.append(xor_bytes(rotated, rcon))
+    return keys
+
+def encrypt_block(block: bytes, round_keys: list) -> bytes:
+    state = block
+    for rk in round_keys:
+        state = bytes(toy_sbox(b) for b in state)  # SubBytes
+        state = xor_bytes(state, rk)               # AddRoundKey
+    return state
+
+def decrypt_block(block: bytes, round_keys: list) -> bytes:
+    state = block
+    for rk in reversed(round_keys):
+        state = xor_bytes(state, rk)                    # undo AddRoundKey
+        state = bytes(toy_sbox(b) for b in state)       # undo SubBytes (self-inverse)
+    return state
+
+def encrypt_file(plaintext: str, key: bytes, rounds: int = 3) -> bytes:
+    data       = pad(plaintext.encode())
+    round_keys = generate_round_keys(key, rounds)
+    return b"".join(
+        encrypt_block(data[i:i+BLOCK_SIZE], round_keys)
+        for i in range(0, len(data), BLOCK_SIZE)
+    )
+
+def decrypt_file(ciphertext: bytes, key: bytes, rounds: int = 3) -> str:
+    round_keys = generate_round_keys(key, rounds)
+    plain = b"".join(
+        decrypt_block(ciphertext[i:i+BLOCK_SIZE], round_keys)
+        for i in range(0, len(ciphertext), BLOCK_SIZE)
+    )
+    return unpad(plain).decode()
+
+# --- Demo ---
+key = b"MySecretKey12345"   # 16-byte key
+msg = "Top Secret File Contents!"
+print(f"Original:  '{msg}'")
+cipher    = encrypt_file(msg, key)
+recovered = decrypt_file(cipher, key)
+print(f"Encrypted:  {cipher.hex()}")
+print(f"Decrypted: '{recovered}'")
+print(f"Match: {'YES' if msg == recovered else 'NO'}")
+```
+
+---
+
 ## 11. Key Takeaways
 
 - **File system encryption** converts data from plaintext to ciphertext — the encryption key is the only way to decode it

@@ -241,6 +241,370 @@ mindmap
 
 ---
 
+## 8. Code Examples
+
+> Working code that demonstrates different OS scheduler types in practice.
+
+### C++ — Simple Version
+
+Simulate switching between Batch, Time-sharing, and Real-Time OS schedulers using a mock job queue.
+
+```cpp
+// OS Types: Simple demonstration
+// Shows: How Batch, Time-sharing, and Real-Time OS schedulers dispatch jobs differently
+// Compile: g++ -std=c++17 03_os_types.cpp -o out
+
+#include <iostream>
+#include <vector>
+#include <queue>
+#include <algorithm>
+#include <string>
+using namespace std;
+
+// A job with a name, CPU duration, and optional deadline
+struct Job {
+    string name;
+    int duration;   // CPU time needed
+    int deadline;   // 0 = no deadline (Batch / Time-sharing)
+};
+
+// ===================================
+// BATCH OS: runs jobs one after another — no user interaction
+// ===================================
+void simulateBatchOS(const vector<Job>& jobs) {
+    cout << "\n--- Batch OS ---\n";
+    cout << "Jobs submitted to operator. Processing one by one:\n";
+    int time = 0;
+    for (const auto& job : jobs) {
+        cout << "  [t=" << time << "] Running: " << job.name
+             << " (duration=" << job.duration << ")\n";
+        time += job.duration;
+    }
+    cout << "  [t=" << time << "] All batch jobs done. Makespan=" << time << "\n";
+}
+
+// ===================================
+// TIME-SHARING OS: each job gets a quantum, then yields CPU
+// ===================================
+void simulateTimeSharingOS(vector<Job> jobs, int quantum) {
+    cout << "\n--- Time-Sharing OS (quantum=" << quantum << ") ---\n";
+
+    // Queue of (name, remaining_time)
+    queue<pair<string, int>> rq;
+    for (const auto& j : jobs) rq.push({j.name, j.duration});
+
+    int time = 0;
+    while (!rq.empty()) {
+        auto [name, remaining] = rq.front();
+        rq.pop();
+
+        int ran = min(remaining, quantum);
+        time += ran;
+        remaining -= ran;
+
+        if (remaining > 0) {
+            cout << "  [t=" << time << "] " << name << " ran " << ran
+                 << " → " << remaining << " left (preempted)\n";
+            rq.push({name, remaining});   // Back to queue
+        } else {
+            cout << "  [t=" << time << "] " << name << " ran " << ran << " → DONE\n";
+        }
+    }
+    cout << "  Users interact with all jobs — each gets CPU turns!\n";
+}
+
+// ===================================
+// REAL-TIME OS: Earliest Deadline First — must meet deadlines
+// ===================================
+void simulateRTOS(vector<Job> jobs) {
+    cout << "\n--- Real-Time OS (Earliest Deadline First) ---\n";
+
+    // Sort by deadline — most urgent first
+    sort(jobs.begin(), jobs.end(), [](const Job& a, const Job& b) {
+        return a.deadline < b.deadline;
+    });
+
+    int time = 0;
+    for (const auto& job : jobs) {
+        int finishTime = time + job.duration;
+        bool metDeadline = (finishTime <= job.deadline);
+        cout << "  [t=" << time << "→" << finishTime << "] " << job.name
+             << " | deadline=" << job.deadline
+             << " | " << (metDeadline ? "DEADLINE MET" : "DEADLINE MISSED!") << "\n";
+        time = finishTime;
+    }
+}
+
+int main() {
+    vector<Job> batchJobs = {
+        {"Payroll", 5, 0},
+        {"Report",  3, 0},
+        {"Backup",  8, 0},
+    };
+
+    vector<Job> tsJobs = {
+        {"User A", 6, 0},
+        {"User B", 4, 0},
+        {"User C", 5, 0},
+    };
+
+    vector<Job> rtJobs = {
+        {"GPS update",    2, 3 },
+        {"Engine control",3, 8 },
+        {"Airbag sensor", 1, 5 },
+    };
+
+    simulateBatchOS(batchJobs);
+    simulateTimeSharingOS(tsJobs, 2);
+    simulateRTOS(rtJobs);
+
+    return 0;
+}
+```
+
+### C++ — Medium / LeetCode Style
+
+Given N jobs and a scheduler type, compute completion order and makespan for each OS type.
+
+```cpp
+// OS Types: Optimized / LeetCode-style
+// Problem: Given N jobs, simulate Batch, Round-Robin (Time-sharing), and EDF (RTOS)
+//          scheduling. Report makespan and whether all RTOS deadlines are met.
+// Complexity: O(N log N) EDF sort, O(N*B/Q) Round-Robin
+
+#include <iostream>
+#include <vector>
+#include <queue>
+#include <algorithm>
+#include <string>
+using namespace std;
+
+struct Job { string name; int burst, deadline; };
+
+int batchSchedule(const vector<Job>& jobs) {
+    int time = 0;
+    cout << "[Batch]  ";
+    for (const auto& j : jobs) {
+        cout << j.name << "(t=" << time << ") ";
+        time += j.burst;
+    }
+    cout << "| makespan=" << time << "\n";
+    return time;
+}
+
+int roundRobin(vector<Job> jobs, int q) {
+    queue<pair<string,int>> rq;
+    for (auto& j : jobs) rq.push({j.name, j.burst});
+    int time = 0;
+    cout << "[RR q=" << q << "] ";
+    while (!rq.empty()) {
+        auto [name, rem] = rq.front(); rq.pop();
+        int run = min(rem, q);
+        cout << name << "(" << run << ") ";
+        time += run; rem -= run;
+        if (rem > 0) rq.push({name, rem});
+    }
+    cout << "| makespan=" << time << "\n";
+    return time;
+}
+
+bool rtosEDF(vector<Job> jobs) {
+    sort(jobs.begin(), jobs.end(), [](auto& a, auto& b){
+        return a.deadline < b.deadline;
+    });
+    int time = 0; bool allMet = true;
+    cout << "[EDF]    ";
+    for (auto& j : jobs) {
+        time += j.burst;
+        bool met = (time <= j.deadline);
+        if (!met) allMet = false;
+        cout << j.name << (met ? "✓" : "✗") << " ";
+    }
+    cout << "\n";
+    return allMet;
+}
+
+int main() {
+    vector<Job> jobs   = {{"A",5,0},{"B",3,0},{"C",4,0}};
+    vector<Job> rtJobs = {{"GPS",2,3},{"Engine",3,8},{"Airbag",1,5}};
+
+    cout << "=== OS Scheduling Comparison ===\n";
+    batchSchedule(jobs);
+    roundRobin(jobs, 2);
+    bool ok = rtosEDF(rtJobs);
+    cout << (ok ? "All RTOS deadlines met!\n" : "WARNING: Deadlines missed!\n");
+
+    return 0;
+}
+```
+
+### Python — Simple Version
+
+Simulate Batch, Time-sharing, and Real-Time OS schedulers each processing a job queue.
+
+```python
+# OS Types: Simple demonstration
+# Shows: How Batch, Time-sharing (Round Robin), and RTOS (EDF) schedule jobs differently
+# Run: python3 03_os_types.py
+
+from collections import deque
+
+
+class Job:
+    def __init__(self, name, duration, deadline=0):
+        self.name     = name
+        self.duration = duration    # CPU time units this job needs
+        self.deadline = deadline    # 0 = no deadline (Batch / Time-sharing only)
+
+
+def simulate_batch_os(jobs):
+    """Batch OS: runs each job completely before starting the next."""
+    print("\n--- Batch OS ---")
+    print("Jobs submitted to operator. Processing one by one:")
+    time = 0
+    for job in jobs:
+        print(f"  [t={time}] Running: {job.name} (duration={job.duration})")
+        time += job.duration
+    print(f"  [t={time}] All batch jobs done. Makespan={time}")
+
+
+def simulate_time_sharing_os(jobs, quantum):
+    """Time-sharing OS: each job gets a time slice (quantum), then yields CPU."""
+    print(f"\n--- Time-Sharing OS (quantum={quantum}) ---")
+    # Queue holds (name, remaining_time)
+    queue = deque((job.name, job.duration) for job in jobs)
+    time = 0
+
+    while queue:
+        name, remaining = queue.popleft()
+        ran = min(remaining, quantum)
+        remaining -= ran
+        time += ran
+
+        if remaining > 0:
+            print(f"  [t={time}] {name} ran {ran} → {remaining} left (preempted, re-queued)")
+            queue.append((name, remaining))  # Goes to the back of the queue
+        else:
+            print(f"  [t={time}] {name} ran {ran} → DONE")
+
+    print("  Every user gets CPU turns — no one waits forever!")
+
+
+def simulate_rtos(jobs):
+    """Real-Time OS: Earliest Deadline First — most urgent job runs first."""
+    print("\n--- Real-Time OS (Earliest Deadline First) ---")
+    # Sort by deadline so the most urgent job runs first
+    sorted_jobs = sorted(jobs, key=lambda j: j.deadline)
+    time = 0
+
+    for job in sorted_jobs:
+        time += job.duration
+        met = time <= job.deadline
+        status = "DEADLINE MET" if met else "DEADLINE MISSED!"
+        print(f"  [t={time}] {job.name} | deadline={job.deadline} | {status}")
+
+
+def main():
+    batch_jobs = [
+        Job("Payroll", 5),
+        Job("Report",  3),
+        Job("Backup",  8),
+    ]
+
+    ts_jobs = [
+        Job("User A", 6),
+        Job("User B", 4),
+        Job("User C", 5),
+    ]
+
+    rt_jobs = [
+        Job("GPS update",     2, deadline=3),
+        Job("Engine control", 3, deadline=8),
+        Job("Airbag sensor",  1, deadline=5),
+    ]
+
+    simulate_batch_os(batch_jobs)
+    simulate_time_sharing_os(ts_jobs, quantum=2)
+    simulate_rtos(rt_jobs)
+
+
+if __name__ == "__main__":
+    main()
+```
+
+### Python — Medium Level
+
+Cleanly implement all three schedulers and compare their output for the same job set.
+
+```python
+# OS Types: Optimized / Pythonic
+# Problem: Given N jobs, simulate Batch, Round-Robin, and EDF scheduling.
+#          Report makespan and RTOS deadline compliance.
+# Complexity: O(N log N) for EDF sort, O(N*B/Q) for Round-Robin
+
+from collections import deque
+from dataclasses import dataclass
+from typing import List
+
+
+@dataclass
+class Job:
+    name:     str
+    burst:    int
+    deadline: int = 0
+
+
+def batch(jobs: List[Job]) -> int:
+    time, order = 0, []
+    for j in jobs:
+        time += j.burst
+        order.append(f"{j.name}(done@{time})")
+    print("[Batch]  ", " → ".join(order), f"| makespan={time}")
+    return time
+
+
+def round_robin(jobs: List[Job], q: int) -> int:
+    rq = deque((j.name, j.burst) for j in jobs)
+    time, log = 0, []
+    while rq:
+        name, rem = rq.popleft()
+        run = min(rem, q)
+        time += run
+        rem -= run
+        log.append(f"{name}({run})")
+        if rem > 0:
+            rq.append((name, rem))
+    print(f"[RR q={q}]", " ".join(log), f"| makespan={time}")
+    return time
+
+
+def edf(jobs: List[Job]) -> bool:
+    sorted_jobs = sorted(jobs, key=lambda j: j.deadline)
+    time, results = 0, []
+    for j in sorted_jobs:
+        time += j.burst
+        met = time <= j.deadline
+        results.append(f"{j.name}({'✓' if met else '✗'})")
+    print("[EDF]    ", " ".join(results))
+    return all(
+        sum(j.burst for j in sorted_jobs[:i+1]) <= sorted_jobs[i].deadline
+        for i in range(len(sorted_jobs))
+    )
+
+
+if __name__ == "__main__":
+    jobs    = [Job("A", 5), Job("B", 3), Job("C", 4)]
+    rt_jobs = [Job("GPS", 2, 3), Job("Engine", 3, 8), Job("Airbag", 1, 5)]
+
+    print("=== OS Scheduling Comparison ===")
+    batch(jobs)
+    round_robin(jobs, q=2)
+    ok = edf(rt_jobs)
+    print("All RTOS deadlines met!" if ok else "WARNING: Deadlines missed!")
+```
+
+---
+
 ## 9. Key Takeaways
 
 - OS types differ in **how many users** they support and **how many tasks** they handle simultaneously.

@@ -243,6 +243,285 @@ A well-managed city runs smoothly — a well-designed OS does the same for your 
 
 ---
 
+## 7. Code Examples
+
+> Working code that demonstrates OS resource management in practice.
+
+### C++ — Simple Version
+
+Simulate an OS resource manager dispatching jobs while tracking CPU and memory limits.
+
+```cpp
+// OS Resource Manager: Simple demonstration
+// Shows: How an OS manages CPU, memory, and I/O to dispatch jobs
+// Compile: g++ -std=c++17 01_os_resource_manager.cpp -o out
+
+#include <iostream>
+#include <vector>
+#include <string>
+using namespace std;
+
+// Represents a job submitted to the OS
+struct Job {
+    string name;
+    int cpuNeeded;    // CPU units required
+    int memNeeded;    // Memory (MB) required
+    bool needsIO;     // Whether this job uses I/O
+};
+
+// Simulated OS resource manager
+struct OSResourceManager {
+    int totalCPU = 4;       // 4 CPU units available
+    int totalMem = 1024;    // 1024 MB of memory
+    int usedCPU  = 0;
+    int usedMem  = 0;
+
+    // Check if there are enough free resources for this job
+    bool canRun(const Job& job) {
+        return (usedCPU + job.cpuNeeded <= totalCPU) &&
+               (usedMem + job.memNeeded <= totalMem);
+    }
+
+    // Try to assign resources and launch the job
+    void dispatch(const Job& job) {
+        if (canRun(job)) {
+            usedCPU += job.cpuNeeded;
+            usedMem += job.memNeeded;
+            cout << "[OS] Dispatched: " << job.name
+                 << " | CPU used: " << usedCPU << "/" << totalCPU
+                 << " | Mem used: " << usedMem << "/" << totalMem << " MB";
+            if (job.needsIO) cout << " | I/O: scheduled";
+            cout << "\n";
+        } else {
+            cout << "[OS] REJECTED: " << job.name << " (not enough resources)\n";
+        }
+    }
+
+    // Free all resources (simulates jobs finishing)
+    void releaseAll() {
+        usedCPU = 0;
+        usedMem = 0;
+        cout << "[OS] All resources released.\n";
+    }
+};
+
+int main() {
+    OSResourceManager os;
+
+    // Jobs with different resource needs
+    vector<Job> jobs = {
+        {"Browser",    1, 256, true },
+        {"VideoGame",  2, 512, false},
+        {"TextEditor", 1, 128, true },
+        {"Compiler",   3, 400, false},  // Should be rejected — not enough CPU left
+    };
+
+    cout << "=== OS Resource Dispatcher ===\n\n";
+    for (const auto& job : jobs) {
+        os.dispatch(job);
+    }
+
+    cout << "\n";
+    os.releaseAll();
+
+    return 0;
+}
+```
+
+### C++ — Medium / LeetCode Style
+
+Given N jobs with CPU and memory requirements, dispatch them optimally and report which are accepted vs rejected.
+
+```cpp
+// OS Resource Manager: Optimized / LeetCode-style
+// Problem: Given N jobs with (cpu, mem) requirements and a fixed-capacity OS,
+//          dispatch each job if resources allow and report the outcome.
+// Complexity: O(N) time, O(1) extra space
+
+#include <iostream>
+#include <vector>
+#include <string>
+using namespace std;
+
+struct Job { string name; int cpu, mem; bool io; };
+
+class OSSimulator {
+    int cpuCap, memCap, cpuUsed = 0, memUsed = 0;
+public:
+    OSSimulator(int cpu, int mem) : cpuCap(cpu), memCap(mem) {}
+
+    string dispatch(const Job& j) {
+        if (cpuUsed + j.cpu > cpuCap || memUsed + j.mem > memCap)
+            return "REJECTED";
+        cpuUsed += j.cpu;
+        memUsed += j.mem;
+        return "RUNNING";
+    }
+
+    void status() const {
+        cout << "  CPU: " << cpuUsed << "/" << cpuCap
+             << "  MEM: " << memUsed << "/" << memCap << " MB\n";
+    }
+};
+
+int main() {
+    OSSimulator os(4, 1024);
+
+    vector<Job> jobs = {
+        {"Browser",    1, 256, true },
+        {"VideoGame",  2, 512, false},
+        {"TextEditor", 1, 128, true },
+        {"Compiler",   3, 400, false},
+    };
+
+    cout << "=== Job Dispatch Results ===\n";
+    for (const auto& j : jobs) {
+        string result = os.dispatch(j);
+        cout << j.name << " -> " << result << "\n";
+        os.status();
+    }
+
+    return 0;
+}
+```
+
+### Python — Simple Version
+
+Simulate an OS resource manager that tracks CPU and memory while dispatching jobs.
+
+```python
+# OS Resource Manager: Simple demonstration
+# Shows: How an OS manages CPU and memory to dispatch or reject jobs
+# Run: python3 01_os_resource_manager.py
+
+
+# Represents a job needing resources
+class Job:
+    def __init__(self, name, cpu_needed, mem_needed, needs_io=False):
+        self.name      = name
+        self.cpu_needed = cpu_needed   # CPU units required
+        self.mem_needed = mem_needed   # Memory in MB required
+        self.needs_io   = needs_io     # Does this job do I/O?
+
+
+# Simulated OS resource manager
+class OSResourceManager:
+    def __init__(self, total_cpu, total_mem):
+        self.total_cpu = total_cpu     # Total CPU units available
+        self.total_mem = total_mem     # Total memory in MB
+        self.used_cpu  = 0
+        self.used_mem  = 0
+
+    def can_run(self, job):
+        # Check if enough CPU and memory are free
+        return (self.used_cpu + job.cpu_needed <= self.total_cpu and
+                self.used_mem + job.mem_needed <= self.total_mem)
+
+    def dispatch(self, job):
+        if self.can_run(job):
+            self.used_cpu += job.cpu_needed
+            self.used_mem += job.mem_needed
+            io_note = " | I/O: scheduled" if job.needs_io else ""
+            print(f"[OS] Dispatched: {job.name} | "
+                  f"CPU: {self.used_cpu}/{self.total_cpu} | "
+                  f"MEM: {self.used_mem}/{self.total_mem} MB{io_note}")
+        else:
+            print(f"[OS] REJECTED: {job.name} (not enough resources)")
+
+    def release_all(self):
+        self.used_cpu = 0
+        self.used_mem = 0
+        print("[OS] All resources released.")
+
+
+def main():
+    os_mgr = OSResourceManager(total_cpu=4, total_mem=1024)
+
+    jobs = [
+        Job("Browser",    cpu_needed=1, mem_needed=256, needs_io=True),
+        Job("VideoGame",  cpu_needed=2, mem_needed=512, needs_io=False),
+        Job("TextEditor", cpu_needed=1, mem_needed=128, needs_io=True),
+        Job("Compiler",   cpu_needed=3, mem_needed=400, needs_io=False),  # Rejected
+    ]
+
+    print("=== OS Resource Dispatcher ===\n")
+    for job in jobs:
+        os_mgr.dispatch(job)
+
+    print()
+    os_mgr.release_all()
+
+
+if __name__ == "__main__":
+    main()
+```
+
+### Python — Medium Level
+
+Given N jobs with resource requirements, dispatch them and produce a summary report.
+
+```python
+# OS Resource Manager: Optimized / Pythonic
+# Problem: Given N jobs with (cpu, mem) requirements and a fixed-capacity OS,
+#          dispatch each job if resources allow and produce a summary report.
+# Complexity: O(N) time, O(N) space for log
+
+from dataclasses import dataclass, field
+from typing import List, Tuple
+
+
+@dataclass
+class Job:
+    name: str
+    cpu:  int
+    mem:  int
+    io:   bool = False
+
+
+class OSSimulator:
+    def __init__(self, cpu_cap: int, mem_cap: int):
+        self.cpu_cap  = cpu_cap
+        self.mem_cap  = mem_cap
+        self.cpu_used = 0
+        self.mem_used = 0
+        self.log: List[Tuple[str, str]] = []
+
+    def dispatch(self, job: Job) -> str:
+        if self.cpu_used + job.cpu > self.cpu_cap or self.mem_used + job.mem > self.mem_cap:
+            self.log.append((job.name, "REJECTED"))
+            return "REJECTED"
+        self.cpu_used += job.cpu
+        self.mem_used += job.mem
+        self.log.append((job.name, "RUNNING"))
+        return "RUNNING"
+
+    def summary(self):
+        print("\n=== Dispatch Summary ===")
+        for name, status in self.log:
+            print(f"  {name:<15} -> {status}")
+        print(f"\nFinal CPU usage: {self.cpu_used}/{self.cpu_cap}")
+        print(f"Final MEM usage: {self.mem_used}/{self.mem_cap} MB")
+
+
+if __name__ == "__main__":
+    os_sim = OSSimulator(cpu_cap=4, mem_cap=1024)
+
+    jobs = [
+        Job("Browser",    1, 256, True),
+        Job("VideoGame",  2, 512, False),
+        Job("TextEditor", 1, 128, True),
+        Job("Compiler",   3, 400, False),
+    ]
+
+    for job in jobs:
+        result = os_sim.dispatch(job)
+        print(f"{job.name} -> {result}")
+
+    os_sim.summary()
+```
+
+---
+
 ## 8. Key Takeaways
 
 - An OS is a **software intermediary** between hardware and the user.

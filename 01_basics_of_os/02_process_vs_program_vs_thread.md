@@ -257,6 +257,370 @@ flowchart TD
 
 ---
 
+## 10. Code Examples
+
+> Working code that demonstrates Program, Process, and Thread concepts in practice.
+
+### C++ — Simple Version
+
+Show three structs — Program (passive code), Process (active instance with state), Thread (execution unit inside a process).
+
+```cpp
+// Program vs Process vs Thread: Simple demonstration
+// Shows: The difference between static code (Program), running instance (Process),
+//        and lightweight execution unit (Thread)
+// Compile: g++ -std=c++17 02_program_process_thread.cpp -o out
+
+#include <iostream>
+#include <vector>
+#include <string>
+using namespace std;
+
+// ==========================================
+// PROGRAM: Just code on disk — passive, does nothing
+// ==========================================
+struct Program {
+    string name;          // Executable file name
+    string filePath;      // Where it lives on disk
+    long   sizeBytes;     // Disk space used
+
+    void showInfo() const {
+        cout << "[PROGRAM] " << name << " | Path: " << filePath
+             << " | Size: " << sizeBytes / 1024 << " KB (just sitting on disk)\n";
+    }
+};
+
+// ==========================================
+// PROCESS: A program that is actively running in memory
+// ==========================================
+struct Process {
+    int    pid;           // Unique ID assigned by the OS
+    string name;          // Which program is running
+    string state;         // Ready / Running / Waiting
+    int    memoryMB;      // RAM allocated to this process
+
+    Process(int id, string n, int mem)
+        : pid(id), name(n), state("Ready"), memoryMB(mem) {}
+
+    void run() {
+        state = "Running";
+        cout << "[PROCESS] PID=" << pid << " | " << name
+             << " | State: " << state << " | Memory: " << memoryMB << " MB\n";
+    }
+
+    void waitForIO() {
+        state = "Waiting";
+        cout << "[PROCESS] PID=" << pid << " | " << name
+             << " | State: " << state << " (blocked — waiting for I/O)\n";
+    }
+};
+
+// ==========================================
+// THREAD: Lightweight unit living inside a process
+// ==========================================
+struct Thread {
+    int    threadId;      // Unique thread ID
+    int    ownerPID;      // Which process owns this thread
+    string task;          // What work this thread is doing
+
+    void execute() const {
+        cout << "[THREAD] TID=" << threadId
+             << " (in PID=" << ownerPID << ") | Task: " << task << "\n";
+    }
+};
+
+int main() {
+    cout << "=== Program vs Process vs Thread Demo ===\n\n";
+
+    // 1. A program is just a static file on disk
+    cout << "-- Programs on disk --\n";
+    Program chrome{"chrome.exe", "C:/Program Files/Chrome/", 150L * 1024 * 1024};
+    chrome.showInfo();
+
+    cout << "\n-- Launching chrome.exe creates separate processes (one per tab) --\n";
+
+    // 2. One program → multiple processes
+    Process tab1(1001, "Chrome Tab: Gmail",   256);
+    Process tab2(1002, "Chrome Tab: YouTube", 512);
+    tab1.run();
+    tab2.run();
+    tab1.waitForIO();   // Gmail is waiting for email data from the server
+
+    cout << "\n-- Each process runs multiple threads (all share the process's memory) --\n";
+
+    // 3. Threads inside the Gmail process
+    Thread renderThread {1, 1001, "Render HTML page"};
+    Thread networkThread{2, 1001, "Fetch email from server"};
+    Thread jsThread     {3, 1001, "Run JavaScript animations"};
+
+    renderThread.execute();
+    networkThread.execute();
+    jsThread.execute();
+
+    cout << "\nSummary: Program(disk) → Process(memory+state) → Thread(CPU work)\n";
+    return 0;
+}
+```
+
+### C++ — Medium / LeetCode Style
+
+Given a list of programs, simulate launching each as a process with multiple threads; track states and print the process table.
+
+```cpp
+// Program vs Process vs Thread: Optimized / LeetCode-style
+// Problem: Simulate an OS process table — launch programs as processes, each with
+//          multiple threads. Track states and report total thread count.
+// Complexity: O(N*T) time, O(N*T) space  (N=processes, T=threads per process)
+
+#include <iostream>
+#include <vector>
+#include <string>
+using namespace std;
+
+enum class State { Ready, Running, Waiting, Terminated };
+
+string stateStr(State s) {
+    switch (s) {
+        case State::Ready:      return "Ready";
+        case State::Running:    return "Running";
+        case State::Waiting:    return "Waiting";
+        case State::Terminated: return "Terminated";
+    }
+    return "?";
+}
+
+struct Thread {
+    int    tid;
+    string task;
+};
+
+struct Process {
+    int            pid;
+    string         programName;
+    State          state = State::Ready;
+    int            memMB;
+    vector<Thread> threads;
+
+    void addThread(string task) {
+        threads.push_back({(int)threads.size() + 1, move(task)});
+    }
+
+    void print() const {
+        cout << "  PID=" << pid << " [" << stateStr(state) << "] "
+             << programName << " (" << memMB << " MB)"
+             << " | Threads: " << threads.size() << "\n";
+        for (const auto& t : threads)
+            cout << "    TID=" << t.tid << " -> " << t.task << "\n";
+    }
+};
+
+int main() {
+    vector<Process> table;
+
+    // Launch Chrome with 3 threads
+    Process chrome{1001, "chrome.exe", State::Running, 256, {}};
+    chrome.addThread("Render UI");
+    chrome.addThread("Network I/O");
+    chrome.addThread("Run JavaScript");
+    table.push_back(chrome);
+
+    // Launch VS Code with 2 threads
+    Process vscode{1002, "code.exe", State::Running, 384, {}};
+    vscode.addThread("File watcher");
+    vscode.addThread("Language server");
+    table.push_back(vscode);
+
+    // Launch a backup job that is currently waiting on I/O
+    Process backup{1003, "backup.exe", State::Waiting, 64, {}};
+    backup.addThread("File copy (I/O blocked)");
+    table.push_back(backup);
+
+    cout << "=== OS Process Table ===\n\n";
+    for (const auto& p : table) p.print();
+
+    int totalThreads = 0;
+    for (const auto& p : table) totalThreads += p.threads.size();
+    cout << "\nTotal processes: " << table.size()
+         << " | Total threads: " << totalThreads << "\n";
+
+    return 0;
+}
+```
+
+### Python — Simple Version
+
+Three classes — Program (static file), Process (running instance), Thread (execution unit) — with a realistic demo.
+
+```python
+# Program vs Process vs Thread: Simple demonstration
+# Shows: Program = passive code on disk, Process = active instance, Thread = CPU worker
+# Run: python3 02_program_process_thread.py
+
+
+# ===================================================
+# PROGRAM: Static code sitting on disk — does nothing by itself
+# ===================================================
+class Program:
+    def __init__(self, name, file_path, size_kb):
+        self.name      = name          # Executable name
+        self.file_path = file_path     # Location on disk
+        self.size_kb   = size_kb       # Disk space used
+
+    def show_info(self):
+        print(f"[PROGRAM] {self.name} | Path: {self.file_path} | Size: {self.size_kb} KB")
+        print(f"          → Passive — just sitting on disk, doing nothing.")
+
+
+# ===================================================
+# PROCESS: A program that has been loaded into memory and is running
+# ===================================================
+class Process:
+    _next_pid = 1000   # OS assigns incrementing PIDs
+
+    def __init__(self, program_name, memory_mb):
+        self.pid          = Process._next_pid   # Unique process ID
+        Process._next_pid += 1
+        self.program_name = program_name
+        self.state        = "Ready"             # Starts in Ready state
+        self.memory_mb    = memory_mb
+
+    def run(self):
+        self.state = "Running"
+        print(f"[PROCESS] PID={self.pid} | {self.program_name} | "
+              f"State: {self.state} | Memory: {self.memory_mb} MB")
+
+    def wait_for_io(self):
+        self.state = "Waiting"
+        print(f"[PROCESS] PID={self.pid} | {self.program_name} | "
+              f"State: {self.state} (blocked — waiting for I/O data)")
+
+
+# ===================================================
+# THREAD: Lightweight worker inside a process — shares its memory
+# ===================================================
+class Thread:
+    def __init__(self, thread_id, owner_pid, task):
+        self.thread_id = thread_id   # Thread's unique ID
+        self.owner_pid = owner_pid   # The process this thread belongs to
+        self.task      = task        # What work this thread performs
+
+    def execute(self):
+        print(f"[THREAD] TID={self.thread_id} "
+              f"(in PID={self.owner_pid}) | Task: {self.task}")
+
+
+def main():
+    print("=== Program vs Process vs Thread Demo ===\n")
+
+    # 1. A program is just a file on disk
+    print("-- Programs on disk --")
+    chrome_program = Program("chrome.exe", "C:/Program Files/Chrome/", 150_000)
+    chrome_program.show_info()
+
+    print("\n-- Launching chrome.exe creates multiple processes (one per tab) --")
+
+    # 2. One program can become multiple processes
+    tab_gmail   = Process("Chrome Tab: Gmail",   256)
+    tab_youtube = Process("Chrome Tab: YouTube", 512)
+    tab_gmail.run()
+    tab_youtube.run()
+    tab_gmail.wait_for_io()   # Gmail waits for server response
+
+    print("\n-- Each process contains multiple threads sharing the same memory --")
+
+    # 3. Three threads inside the Gmail process
+    render_thread  = Thread(1, tab_gmail.pid, "Render HTML page")
+    network_thread = Thread(2, tab_gmail.pid, "Fetch email from server")
+    js_thread      = Thread(3, tab_gmail.pid, "Run JavaScript animations")
+
+    render_thread.execute()
+    network_thread.execute()
+    js_thread.execute()
+
+    print("\nSummary: Program(disk) → Process(memory+state) → Thread(CPU execution)")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+### Python — Medium Level
+
+Simulate an OS process table — launch programs as processes with threads, track states, and report system-wide stats.
+
+```python
+# Program vs Process vs Thread: Optimized / Pythonic
+# Problem: Simulate an OS process table. Launch programs as processes with multiple
+#          threads. Track process state and report total thread count.
+# Complexity: O(N) time, O(N) space
+
+from dataclasses import dataclass, field
+from enum import Enum, auto
+from itertools import count
+from typing import List
+
+
+class State(Enum):
+    READY      = auto()
+    RUNNING    = auto()
+    WAITING    = auto()
+    TERMINATED = auto()
+
+
+@dataclass
+class Thread:
+    tid:  int
+    task: str
+
+
+@dataclass
+class Process:
+    pid:     int
+    name:    str
+    state:   State        = State.READY
+    mem_mb:  int          = 0
+    threads: List[Thread] = field(default_factory=list)
+
+    def add_thread(self, task: str):
+        self.threads.append(Thread(len(self.threads) + 1, task))
+
+    def __str__(self):
+        thread_lines = "\n".join(f"    TID={t.tid} -> {t.task}" for t in self.threads)
+        return (f"  PID={self.pid} [{self.state.name}] {self.name} "
+                f"({self.mem_mb} MB) | {len(self.threads)} thread(s)\n{thread_lines}")
+
+
+class ProcessTable:
+    _pid_gen = count(1000)
+
+    def launch(self, name: str, mem_mb: int, thread_tasks: List[str]) -> Process:
+        p = Process(pid=next(self._pid_gen), name=name,
+                    state=State.RUNNING, mem_mb=mem_mb)
+        for task in thread_tasks:
+            p.add_thread(task)
+        return p
+
+
+if __name__ == "__main__":
+    pt = ProcessTable()
+
+    processes = [
+        pt.launch("chrome.exe", 256, ["Render UI", "Network I/O", "Run JavaScript"]),
+        pt.launch("code.exe",   384, ["File watcher", "Language server"]),
+        pt.launch("backup.exe",  64, ["File copy"]),
+    ]
+    processes[-1].state = State.WAITING   # backup is blocked on I/O
+
+    print("=== OS Process Table ===\n")
+    for p in processes:
+        print(p)
+
+    total_threads = sum(len(p.threads) for p in processes)
+    print(f"\nProcesses: {len(processes)} | Total Threads: {total_threads}")
+```
+
+---
+
 ## 11. Key Takeaways
 
 - A **program** is passive code stored on disk — it does nothing until executed.

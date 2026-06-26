@@ -229,6 +229,343 @@ Batch OS    →   Multiprogramming   →    Multitasking
 
 ---
 
+## 6. Code Examples
+
+> Working code that demonstrates Batch, Multiprogramming, and Multitasking scheduling in practice.
+
+### C++ — Simple Version
+
+Simulate batch processing (sequential), multiprogramming (overlap I/O), and multitasking (time-sliced), comparing CPU utilization.
+
+```cpp
+// Batch / Multiprogramming / Multitasking: Simple demonstration
+// Shows: How each OS type handles jobs — sequential, I/O-overlap, and time-sliced
+// Compile: g++ -std=c++17 04_batch_multi.cpp -o out
+
+#include <iostream>
+#include <vector>
+#include <queue>
+#include <algorithm>
+#include <string>
+using namespace std;
+
+struct Job {
+    string name;
+    int    cpuTime;   // CPU time the job needs
+    int    ioTime;    // I/O time (CPU idles during this in Batch mode)
+};
+
+// ===================================
+// BATCH OS: one job at a time — CPU goes idle during I/O
+// ===================================
+void simulateBatch(const vector<Job>& jobs) {
+    cout << "\n--- Batch OS (sequential, CPU idles on I/O) ---\n";
+    int time = 0, cpuBusy = 0, cpuIdle = 0;
+
+    for (const auto& job : jobs) {
+        cout << "  [t=" << time << "] " << job.name << ": CPU=" << job.cpuTime;
+        cpuBusy += job.cpuTime;
+        time    += job.cpuTime;
+
+        if (job.ioTime > 0) {
+            cout << " → I/O=" << job.ioTime << " (CPU IDLE!)";
+            cpuIdle += job.ioTime;
+            time    += job.ioTime;
+        }
+        cout << " | finish at t=" << time << "\n";
+    }
+    int utilPct = time > 0 ? 100 * cpuBusy / time : 0;
+    cout << "  CPU busy=" << cpuBusy << " | CPU idle=" << cpuIdle
+         << " | Utilization=" << utilPct << "%\n";
+}
+
+// ===================================
+// MULTIPROGRAMMING OS: while one job does I/O, another uses the CPU
+// ===================================
+void simulateMultiprogramming(const vector<Job>& jobs) {
+    cout << "\n--- Multiprogramming OS (overlap I/O with next job's CPU work) ---\n";
+    int time = 0, cpuBusy = 0;
+
+    for (size_t i = 0; i < jobs.size(); i++) {
+        const auto& cur = jobs[i];
+        cout << "  [t=" << time << "] " << cur.name << ": CPU=" << cur.cpuTime;
+        cpuBusy += cur.cpuTime;
+        time    += cur.cpuTime;
+
+        if (cur.ioTime > 0 && i + 1 < jobs.size()) {
+            const auto& nxt = jobs[i + 1];
+            int overlap   = min(cur.ioTime, nxt.cpuTime);
+            int extraWait = max(cur.ioTime - nxt.cpuTime, 0);
+            cout << " → I/O=" << cur.ioTime
+                 << " (meanwhile " << nxt.name << " runs for " << overlap << " units)";
+            time += extraWait;   // Only wait the portion that can't be overlapped
+        }
+        cout << " | t=" << time << "\n";
+    }
+    cout << "  CPU stays busy — I/O and CPU work happen simultaneously!\n";
+}
+
+// ===================================
+// MULTITASKING OS: time-sliced Round Robin — each job gets a quantum
+// ===================================
+void simulateMultitasking(const vector<Job>& jobs, int quantum) {
+    cout << "\n--- Multitasking OS (Round Robin quantum=" << quantum << ") ---\n";
+    queue<pair<string, int>> rq;
+    for (const auto& j : jobs) rq.push({j.name, j.cpuTime});
+
+    int time = 0;
+    while (!rq.empty()) {
+        auto [name, rem] = rq.front();
+        rq.pop();
+        int ran = min(rem, quantum);
+        time += ran; rem -= ran;
+
+        if (rem > 0) {
+            cout << "  [t=" << time << "] " << name << " ran " << ran
+                 << " → " << rem << " left (preempted, back to queue)\n";
+            rq.push({name, rem});
+        } else {
+            cout << "  [t=" << time << "] " << name << " ran " << ran << " → DONE\n";
+        }
+    }
+    cout << "  Users can interact with all running programs!\n";
+}
+
+int main() {
+    vector<Job> jobs = {
+        {"Job A", 4, 3},
+        {"Job B", 3, 0},
+        {"Job C", 5, 2},
+    };
+
+    simulateBatch(jobs);
+    simulateMultiprogramming(jobs);
+    simulateMultitasking(jobs, 2);
+
+    return 0;
+}
+```
+
+### C++ — Medium / LeetCode Style
+
+Given N jobs with CPU and I/O times, compute CPU utilization for Batch vs Multiprogramming and makespan for Multitasking.
+
+```cpp
+// Batch / Multiprogramming / Multitasking: Optimized / LeetCode-style
+// Problem: Given N jobs with (cpu, io) times, compute CPU utilization for Batch
+//          and Multiprogramming, and makespan for Multitasking (Round Robin).
+// Complexity: O(N) for Batch/Multiprogramming, O(N*B/Q) for Round Robin
+
+#include <iostream>
+#include <vector>
+#include <queue>
+#include <numeric>
+#include <string>
+using namespace std;
+
+struct Job { string name; int cpu, io; };
+
+int batchUtilization(const vector<Job>& jobs) {
+    int total = 0, busy = 0;
+    for (auto& j : jobs) { busy += j.cpu; total += j.cpu + j.io; }
+    return total ? 100 * busy / total : 0;
+}
+
+int multiprogramUtilization(const vector<Job>& jobs) {
+    int time = 0, busy = 0;
+    for (size_t i = 0; i < jobs.size(); i++) {
+        busy += jobs[i].cpu;
+        time += jobs[i].cpu;
+        if (jobs[i].io > 0 && i + 1 < jobs.size())
+            time += max(jobs[i].io - jobs[i+1].cpu, 0);  // overlap I/O with next CPU
+    }
+    return time ? 100 * busy / time : 0;
+}
+
+int roundRobinMakespan(const vector<Job>& jobs, int q) {
+    queue<pair<string,int>> rq;
+    for (auto& j : jobs) rq.push({j.name, j.cpu});
+    int time = 0;
+    while (!rq.empty()) {
+        auto [n, rem] = rq.front(); rq.pop();
+        int run = min(rem, q); time += run; rem -= run;
+        if (rem > 0) rq.push({n, rem});
+    }
+    return time;
+}
+
+int main() {
+    vector<Job> jobs = {{"A",4,3},{"B",3,0},{"C",5,2}};
+
+    cout << "=== CPU Utilization Comparison ===\n";
+    cout << "Batch:            " << batchUtilization(jobs)         << "% CPU utilization\n";
+    cout << "Multiprogramming: " << multiprogramUtilization(jobs)  << "% CPU utilization\n";
+    cout << "Multitasking:     makespan=" << roundRobinMakespan(jobs, 2) << " units (q=2)\n";
+
+    return 0;
+}
+```
+
+### Python — Simple Version
+
+Simulate all three OS types step by step, printing what the CPU does at each time unit.
+
+```python
+# Batch / Multiprogramming / Multitasking: Simple demonstration
+# Shows: Batch (sequential), Multiprogramming (overlap I/O), Multitasking (time-sliced)
+# Run: python3 04_batch_multi.py
+
+from collections import deque
+
+
+class Job:
+    def __init__(self, name, cpu_time, io_time=0):
+        self.name     = name
+        self.cpu_time = cpu_time   # CPU time this job needs
+        self.io_time  = io_time    # I/O time (CPU sits idle in Batch mode)
+
+
+def simulate_batch(jobs):
+    """Batch OS: each job runs completely (CPU + I/O) before the next starts."""
+    print("\n--- Batch OS (one job at a time, CPU idles on I/O) ---")
+    time, cpu_busy, cpu_idle = 0, 0, 0
+
+    for job in jobs:
+        print(f"  [t={time}] {job.name}: CPU for {job.cpu_time} units", end="")
+        cpu_busy += job.cpu_time
+        time     += job.cpu_time
+
+        if job.io_time > 0:
+            print(f" → I/O for {job.io_time} units (CPU IDLE!)", end="")
+            cpu_idle += job.io_time
+            time     += job.io_time
+        print(f" | done at t={time}")
+
+    utilization = 100 * cpu_busy // time if time else 0
+    print(f"  CPU busy={cpu_busy} | CPU idle={cpu_idle} | Utilization={utilization}%")
+
+
+def simulate_multiprogramming(jobs):
+    """Multiprogramming: when a job waits on I/O, the CPU is given to the next job."""
+    print("\n--- Multiprogramming OS (overlap I/O with next job's CPU work) ---")
+    time, cpu_busy = 0, 0
+
+    for i, job in enumerate(jobs):
+        print(f"  [t={time}] {job.name}: CPU for {job.cpu_time} units", end="")
+        cpu_busy += job.cpu_time
+        time     += job.cpu_time
+
+        if job.io_time > 0 and i + 1 < len(jobs):
+            next_job = jobs[i + 1]
+            overlap   = min(job.io_time, next_job.cpu_time)
+            extra_wait = max(job.io_time - next_job.cpu_time, 0)
+            print(f" → I/O={job.io_time} "
+                  f"(meanwhile {next_job.name} runs CPU for {overlap} units)", end="")
+            time += extra_wait  # Only wait the non-overlapped portion
+        print(f" | t={time}")
+
+    print("  CPU stayed busy — I/O and CPU work overlapped!")
+
+
+def simulate_multitasking(jobs, quantum):
+    """Multitasking OS: Round Robin — each job gets a time slice, then yields."""
+    print(f"\n--- Multitasking OS (Round Robin quantum={quantum}) ---")
+    queue = deque((job.name, job.cpu_time) for job in jobs)
+    time = 0
+
+    while queue:
+        name, remaining = queue.popleft()
+        ran = min(remaining, quantum)
+        remaining -= ran
+        time += ran
+
+        if remaining > 0:
+            print(f"  [t={time}] {name} ran {ran} → {remaining} left (preempted, re-queued)")
+            queue.append((name, remaining))   # Back to end of queue
+        else:
+            print(f"  [t={time}] {name} ran {ran} → DONE")
+
+    print("  Every user can interact with their programs — each job takes turns!")
+
+
+def main():
+    jobs = [
+        Job("Job A", cpu_time=4, io_time=3),
+        Job("Job B", cpu_time=3, io_time=0),
+        Job("Job C", cpu_time=5, io_time=2),
+    ]
+
+    simulate_batch(jobs)
+    simulate_multiprogramming(jobs)
+    simulate_multitasking(jobs, quantum=2)
+
+
+if __name__ == "__main__":
+    main()
+```
+
+### Python — Medium Level
+
+Compute CPU utilization for each scheduling strategy and compare results in a summary table.
+
+```python
+# Batch / Multiprogramming / Multitasking: Optimized / Pythonic
+# Problem: Given N jobs with (cpu, io) times, compare scheduling strategies —
+#          report CPU utilization for Batch/Multiprogramming and makespan for Multitasking.
+# Complexity: O(N) batch/multiprogram, O(N*B/Q) round-robin
+
+from collections import deque
+from dataclasses import dataclass
+from typing import List
+
+
+@dataclass
+class Job:
+    name: str
+    cpu:  int
+    io:   int = 0
+
+
+def batch_utilization(jobs: List[Job]) -> int:
+    total = sum(j.cpu + j.io for j in jobs)
+    busy  = sum(j.cpu for j in jobs)
+    return 100 * busy // total if total else 0
+
+
+def multiprog_utilization(jobs: List[Job]) -> int:
+    time, busy = 0, 0
+    for i, j in enumerate(jobs):
+        busy += j.cpu
+        time += j.cpu
+        if j.io and i + 1 < len(jobs):
+            time += max(j.io - jobs[i + 1].cpu, 0)  # Overlap I/O with next job's CPU
+    return 100 * busy // time if time else 0
+
+
+def multitasking_makespan(jobs: List[Job], q: int) -> int:
+    rq = deque((j.name, j.cpu) for j in jobs)
+    time = 0
+    while rq:
+        name, rem = rq.popleft()
+        run = min(rem, q)
+        time += run
+        rem -= run
+        if rem:
+            rq.append((name, rem))
+    return time
+
+
+if __name__ == "__main__":
+    jobs = [Job("A", 4, 3), Job("B", 3, 0), Job("C", 5, 2)]
+
+    print("=== Scheduling Strategy Comparison ===")
+    print(f"Batch            → CPU Utilization: {batch_utilization(jobs)}%")
+    print(f"Multiprogramming → CPU Utilization: {multiprog_utilization(jobs)}%")
+    print(f"Multitasking     → Makespan:        {multitasking_makespan(jobs, q=2)} units")
+```
+
+---
+
 ## 7. Key Takeaways
 
 - **Batch OS**: jobs submitted, grouped, and executed sequentially with no interaction — ideal for repetitive bulk work.
